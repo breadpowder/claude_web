@@ -30,7 +30,8 @@ interface ExtensionData {
 
 function formatToolName(name: string): string {
   // Parse mcp__server__tool format into "server > tool"
-  const match = name.match(/^mcp__([^_]+)__(.+)$/)
+  // Uses lazy match for server name to handle underscores (e.g., mcp__my_db__query_users)
+  const match = name.match(/^mcp__(.+?)__(.+)$/)
   if (match) {
     return `${match[1]} > ${match[2]}`
   }
@@ -65,6 +66,11 @@ function App() {
     const createSession = async () => {
       try {
         const res = await fetch('/api/v1/sessions', { method: 'POST' })
+        if (!res.ok) {
+          setError(`Failed to create session: ${res.status}`)
+          setIsConnected(false)
+          return
+        }
         const data = await res.json()
         setSessionId(data.session_id)
         setIsConnected(true)
@@ -160,6 +166,30 @@ function App() {
             }
           } catch {
             // Skip malformed JSON lines
+          }
+        }
+      }
+
+      // Process any remaining buffer content after stream ends
+      if (buffer.trim()) {
+        const line = buffer.trim()
+        if (line.startsWith('data: ') && line.slice(6).trim() !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(line.slice(6).trim())
+            const delta = parsed.choices?.[0]?.delta
+            if (delta?.content) {
+              assistantContent += delta.content
+              setMessages(prev => {
+                const updated = [...prev]
+                const last = updated[updated.length - 1]
+                if (last && last.role === 'assistant') {
+                  updated[updated.length - 1] = { ...last, content: assistantContent, toolCalls: [...toolCalls] }
+                }
+                return updated
+              })
+            }
+          } catch {
+            // Skip malformed remainder
           }
         }
       }

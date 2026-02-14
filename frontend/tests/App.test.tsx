@@ -607,6 +607,78 @@ describe('TASK-010a: Extension UX', () => {
     expect(await screen.findByText('Done.')).toBeVisible()
   })
 
+  test('tool name with underscores in server name parsed correctly', async () => {
+    mockSessionAndExtensions(extensionsWithCommands)
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText(/Connected/i)
+
+    const sseData = [
+      'data: {"id":"chatcmpl-1","choices":[{"delta":{"role":"assistant","content":""},"index":0}]}\n\n',
+      'data: {"id":"chatcmpl-1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"mcp__my_db__query_users","arguments":""}}]},"index":0}]}\n\n',
+      'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"Results."},"index":0}]}\n\n',
+      'data: {"id":"chatcmpl-1","choices":[{"delta":{},"index":0,"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ]
+
+    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/v1/chat/completions' && options?.method === 'POST') {
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: new Headers({ 'content-type': 'text/event-stream' }),
+          body: createSSEStream(sseData),
+        })
+      }
+      if (url === '/api/v1/sessions' && options?.method === 'POST') {
+        return Promise.resolve({
+          ok: true, status: 201,
+          json: () => Promise.resolve({ session_id: 'abc-12345678', status: 'ready', source: 'pre-warm' }),
+        })
+      }
+      if (url === '/api/v1/extensions') {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve(extensionsWithCommands),
+        })
+      }
+      return Promise.resolve({ ok: false, status: 404 })
+    })
+
+    const textarea = screen.getByRole('textbox')
+    await user.type(textarea, 'Query users')
+    await user.keyboard('{Enter}')
+
+    // Server name with underscores should parse correctly
+    expect(await screen.findByText('my_db > query_users')).toBeVisible()
+  })
+
+  test('session creation failure shows error and disables input', async () => {
+    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/v1/sessions' && options?.method === 'POST') {
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ error: 'At capacity' }),
+        })
+      }
+      if (url === '/api/v1/extensions') {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({ mcp_servers: [], skills: [], commands: [], all_slash_commands: [], total_count: 0 }),
+        })
+      }
+      return Promise.resolve({ ok: false, status: 404 })
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText(/Failed to create session/i)).toBeVisible()
+    expect(screen.getByText(/Disconnected/i)).toBeVisible()
+    expect(screen.getByRole('textbox')).toBeDisabled()
+  })
+
   test('extension status badge shows count in header', async () => {
     mockSessionAndExtensions(extensionsWithCommands)
 
