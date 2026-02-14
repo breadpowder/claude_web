@@ -1,735 +1,299 @@
-# Specification Alignment Report: core-engine
+# Spec-to-Plan Alignment Report: Core Engine MVP
 
-**Generated**: 2026-02-08
-**Validator**: sdlc-spec-alignment-check
-**Version**: 1.0
-
----
-
-## Executive Summary
-
-- **Constitution Compliance**: N/A (no .sdlc/constitution.md found)
-- **Story Alignment**: 7/7 stories have task phases (100%), 29/29 scenarios have test coverage (100%)
-- **Total Requirements**: 33 functional requirements (FR-001 through FR-013a, FR-013 through FR-033)
-- **Coverage**: 100% (33/33 requirements have tasks)
-- **Assertion Quality**: 28/28 tasks have TDD specifications with complete assertions
-- **Anti-Pattern Signals**: 0 detected
-- **Strategy Completeness**: 8/8 groups declared
-
-## Validation Status: ✅ PASS
-
-**No critical issues detected. All warnings are informational or low-priority.**
+> **Feature**: core-engine
+> **Date**: 2026-02-14
+> **Validation Type**: Architecture plan vs. specification alignment
+> **Verdict**: PASS (all critical gaps addressed)
 
 ---
 
-## Pass 0: Constitution Compliance
+## Validation Summary
 
-**Status**: SKIPPED
-
-**Reason**: No `.sdlc/constitution.md` file found. Consider running `sdlc-constitution` to establish project principles.
-
-**Note**: This phase would validate MUST/SHOULD principles if a constitution existed. Without constitution, the platform defaults to Python best practices and the constraints defined in the feature spec (Section 5 Constraints, Section 6.3 Agent Guardrails).
-
----
-
-## Pass 0.5: Story-Level Alignment
-
-### Story Phase Coverage
-
-| Story ID | Story Title | Phase in tasks.md? | Tasks Count | Status |
-|----------|-------------|---------------------|-------------|--------|
-| US-001 | Pre-Warmed Session Start | Phase 3 (7 tasks) | 7 | ✅ COVERED |
-| US-002 | Streaming Chat Conversation | Phase 4 (6 tasks) | 6 | ✅ COVERED |
-| US-003 | Tool Use Transparency | Phase 4 (1 task) | 1 | ✅ COVERED |
-| US-004 | Session Memory Limits | Phase 5 (2 tasks) | 2 | ✅ COVERED |
-| US-005 | Chat Input and Controls | Phase 4 (1 task) | 1 | ✅ COVERED |
-| US-006 | Session Resume | Phase 6 (2 tasks) | 2 | ✅ COVERED |
-| US-007 | Error Messages with Context | Phase 7 (2 tasks) | 2 | ✅ COVERED |
-
-**Total**: 7/7 stories (100%) have task phase coverage.
+| Dimension | Items Checked | Aligned | Gaps | Verdict |
+|-----------|--------------|---------|------|---------|
+| ADR Decisions (D1-D10) | 10 | 10 | 0 | PASS |
+| Functional Requirements (Phase 1) | 18 | 18 | 0 | PASS |
+| Non-Functional Requirements | 15 | 13 | 2 (Phase 2+) | PASS |
+| User Stories (Phase 1) | 11 | 11 | 0 | PASS |
+| Edge Cases (HIGH risk) | 36 | 36 | 0 | PASS |
+| Control Flows | 4 | 4 | 0 | PASS |
+| Guardrails (G-001 to G-012) | 12 | 12 | 0 | PASS |
+| Assumptions | 11 | 11 | 0 | PASS (tracked) |
+| Open Questions | 7 | 5 answered, 2 deferred | 0 critical | PASS |
 
 ---
 
-### Acceptance Scenario Coverage: US-001 (Pre-Warmed Session Start)
+## Pass 1: ADR Decision Alignment
 
-| Scenario | Given/When/Then | Test in tasks_details? | Task | Status |
-|----------|-----------------|------------------------|------|--------|
-| Happy path | Given pool filled, When user opens chat, Then "Ready" in <3s | test_startup_fill_returns_true_on_success, test_get_returns_client_from_pool | TASK-007 | ✅ COVERED |
-| Pool empty | Given pool empty, When user opens chat, Then "Preparing..." UI | test_get_returns_none_when_empty | TASK-007 | ✅ COVERED |
-| Pool replenish | Given session assigned, When pool detects empty slot, Then replenish in background | replenish() method tested | TASK-007 | ✅ COVERED |
-| All pre-warms fail | Given all pre-warms fail, When startup, Then readiness probe 503 | test_startup_fill_returns_false_all_fail | TASK-007 | ✅ COVERED |
+Each ADR decision verified against architecture plan artifacts.
 
-**Coverage**: 4/4 scenarios (100%)
+| ADR Decision | Plan Artifact | Aligned? | Notes |
+|---|---|---|---|
+| **D1**: Build custom platform wrapping Claude Agent SDK on CLI | architecture.md: System Overview; implementation_plan.md: Section 1 | YES | Architecture wraps SDK CLI subprocess model exactly as ADR specifies |
+| **D2**: Python + FastAPI backend | implementation_plan.md: Section 3.1, 3.2 | YES | All components Python; FastAPI for all API endpoints |
+| **D3**: Three-layer communication (AG-UI + OpenAI API + REST) | architecture.md: Section 2, 3; implementation_plan.md: Section 4.1 | YES | All three protocols defined with full contracts |
+| **D4**: Pre-warming pool (asyncio.Queue) | architecture.md: PreWarmPool component; implementation_plan.md: PreWarmPool spec | YES | asyncio.Queue, configurable size, blocks readiness probe (G-002) |
+| **D5**: JSON file-based session index (no database) | architecture.md: JSONSessionIndex; implementation_plan.md: Section 5 | YES | Atomic file I/O, file locking, no database dependency |
+| **D6**: Lightweight ExtensionLoader (filesystem scanner) | architecture.md: ExtensionLoader; implementation_plan.md: ExtensionLoader spec | YES | Scans mcp.json, skills/, commands/; re-scans on new session (hot-detection) |
+| **D7**: Zustand for frontend state | implementation_plan.md: Section 3.3, 4.2 | YES | Zustand stores with slice pattern (chat, session, tool, ui); full message rendering |
+| **D8**: No authentication for MVP | implementation_plan.md: Section 4.1 (REST API), decision-log.md | YES | No auth on any endpoint; G-009 enforced |
+| **D9**: Single container deployment | implementation_plan.md: Section 3.4 (Dockerfile) | YES | Single Dockerfile, multi-stage build, health check |
+| **D10**: 10 concurrent sessions on 16GB host | implementation_plan.md: SessionManager (max 10), SubprocessMonitor (2GB RSS) | YES | Max sessions enforced; RSS monitoring at 2GB threshold |
 
----
-
-### Acceptance Scenario Coverage: US-002 (Streaming Chat Conversation)
-
-| Scenario | Given/When/Then | Test in tasks_details? | Task | Status |
-|----------|-----------------|------------------------|------|--------|
-| Happy path | Given active session, When user sends message, Then streaming begins in <2s | test_query_yields_stream_events | TASK-010 | ✅ COVERED |
-| Streaming display | Given streaming, When user observes, Then typing indicator visible, tokens appended | Frontend: messageStore appends stream_delta | TASK-020 | ✅ COVERED |
-| Response complete | Given response complete, When ResultMessage received, Then cost shown | test_response_complete_updates_metadata | TASK-010 | ✅ COVERED |
-| Error mid-stream | Given error mid-stream, Then partial preserved, "retry" suggested | test_stream_error_translation | TASK-018 | ✅ COVERED |
-
-**Coverage**: 4/4 scenarios (100%)
+**Result**: 10/10 ADR decisions fully aligned.
 
 ---
 
-### Acceptance Scenario Coverage: US-003 (Tool Use Transparency)
+## Pass 2: Functional Requirements Alignment
 
-| Scenario | Given/When/Then | Test in tasks_details? | Task | Status |
-|----------|-----------------|------------------------|------|--------|
-| Tool invoked | Given tool invoked, Then ToolUseCard with name and "Executing..." | Frontend: ToolUseCard component | TASK-023 | ✅ COVERED |
-| Tool completes | Given tool completes, Then "Complete (X.Xs)" with result | Frontend: ToolUseCard update | TASK-023 | ✅ COVERED |
-| Tool fails | Given tool fails, Then "Error" in red with reason | Frontend: ToolUseCard error state | TASK-023 | ✅ COVERED |
-| Multiple tools | Given multiple tools, Then each gets ToolUseCard in order | Frontend: MessageList rendering | TASK-023 | ✅ COVERED |
+Each Phase 1 FR from feature-spec.md verified against architecture plan.
 
-**Coverage**: 4/4 scenarios (100%)
+| FR-ID | Requirement | Plan Coverage | Aligned? |
+|---|---|---|---|
+| FR-001 | Session creation with pre-warming pool | PreWarmPool.get() < 100ms; cold start fallback; PREWARM_POOL_SIZE env var; asyncio.Queue | YES |
+| FR-002 | AG-UI endpoint for frontend communication | AG-UI Endpoint in api/agui_endpoint.py; all event types defined in Section 4.2 | YES |
+| FR-003 | OpenAI-compliant streaming API | OpenAI Endpoint in api/openai_endpoint.py; SSE streaming; Section 4.1 contract | YES |
+| FR-004 | Tool use transparency via AG-UI | ToolCallStart, ToolCallArgs, ToolCallEnd, ToolResult events in Section 4.2 | YES |
+| FR-005 | Session duration limits | SubprocessMonitor.check_duration(); MAX_SESSION_DURATION_SECONDS; AG-UI custom events | YES |
+| FR-006 | Memory monitoring (RSS) | SubprocessMonitor.check_rss(); MAX_SESSION_RSS_MB; /proc/<pid>/status; graceful restart | YES |
+| FR-007 | Subprocess cleanup | SubprocessMonitor: SIGTERM, wait 5s, SIGKILL; cleanup_zombies() every 60s | YES |
+| FR-008 | React chat UI with Zustand state | Section 3.3: MessageList, InputBar, ToolUseCard; Zustand stores; full message rendering | YES |
+| FR-009 | Multiple concurrent sessions | SessionManager enforces max 10; SessionList UI; session switching | YES |
+| FR-009a | Session resume | SessionManager.resume_session() with resume=session_id; JSONSessionIndex tracks is_resumable | YES |
+| FR-010 | JSON file-based session index | JSONSessionIndex: atomic I/O, file lock, one index file; Section 5 data model | YES |
+| FR-011 | MCP server integration via mcp.json | ExtensionLoader.scan_mcp(); passes to ClaudeAgentOptions.mcp_servers | YES |
+| FR-011a | Skills integration via ./skills/ | ExtensionLoader.scan_skills(); passes to setting_sources | YES |
+| FR-011b | Custom commands via ./commands/ | ExtensionLoader.scan_commands(); P1 priority | YES |
+| FR-011c | Extension hot-detection on session creation | ExtensionLoader.scan() called on each new session creation | YES |
+| FR-012 | Docker containerization | Dockerfile in Section 3.4; multi-stage build; health check at /api/v1/health/live | YES |
+| FR-013 | Error messages with context | US-007 mapped; AG-UI RunError events; contextual messages in Section 4.2 | YES |
+| FR-014 | REST API for session management | Section 4.1: 7 REST endpoints defined with full contracts | YES |
+| FR-015 | Human-in-the-loop via AG-UI | ApprovalDialog component; AG-UI resume action in Section 4.2 | YES |
 
----
-
-### Acceptance Scenario Coverage: US-004 (Session Memory Limits)
-
-| Scenario | Given/When/Then | Test in tasks_details? | Task | Status |
-|----------|-----------------|------------------------|------|--------|
-| Duration warning at 90% | Given session at 90% duration, Then warning sent | test_check_warns_at_90_percent_duration | TASK-008 | ✅ COVERED |
-| Duration termination | Given session at 100% duration, no query, Then terminated | test_check_terminates_at_100_percent_duration | TASK-008 | ✅ COVERED |
-| Duration with grace | Given session at 100%, query active, Then wait 30s grace then terminate | test_terminate_duration_waits_for_in_flight | TASK-011 | ✅ COVERED |
-| Memory restart | Given RSS > threshold, Then graceful restart with resume | test_check_restarts_on_memory_threshold | TASK-008 | ✅ COVERED |
-| Zombie cleanup | Given zombie process, Then detected and reaped | test_zombie_cleanup | TASK-011 | ✅ COVERED |
-
-**Coverage**: 5/5 scenarios (100%)
-
----
-
-### Acceptance Scenario Coverage: US-005 (Chat Input and Controls)
-
-| Scenario | Given/When/Then | Test in tasks_details? | Task | Status |
-|----------|-----------------|------------------------|------|--------|
-| Enter sends | Given input focused, When Enter, Then message sent | Frontend: InputBar Enter handler | TASK-024 | ✅ COVERED |
-| Ctrl+Shift+X interrupts | Given streaming, When Ctrl+Shift+X, Then interrupted | Frontend: InputBar interrupt handler | TASK-024 | ✅ COVERED |
-| Empty blocked | Given empty input, When Enter, Then nothing sent | Frontend: validation | TASK-024 | ✅ COVERED |
-| Responsive | Given query in flight, When typing, Then input responsive | Frontend: non-blocking input | TASK-024 | ✅ COVERED |
-
-**Coverage**: 4/4 scenarios (100%)
+**Result**: 18/18 Phase 1 FRs fully aligned (including P1 items).
 
 ---
 
-### Acceptance Scenario Coverage: US-006 (Session Resume)
+## Pass 3: Non-Functional Requirements Alignment
 
-| Scenario | Given/When/Then | Test in tasks_details? | Task | Status |
-|----------|-----------------|------------------------|------|--------|
-| Browser closed | Given active session, When browser closed, Then session stays "idle" for 30 min | test_idle_session_timeout | TASK-019 | ✅ COVERED |
-| Resume within timeout | Given return within 30 min, Then session resumed automatically | test_resume_session_loads_context | TASK-012 | ✅ COVERED |
-| Resume after timeout | Given return after 30 min, Then new session with resume=old_id | test_resume_session_loads_context | TASK-012 | ✅ COVERED |
-| Corrupted data | Given corrupted SDK data, Then fresh session with notification | test_resume_corrupted_data_fallback | TASK-012 | ✅ COVERED |
+| NFR-ID | Requirement | Target | Plan Coverage | Aligned? |
+|---|---|---|---|---|
+| NFR-001 | Time to first response (pre-warmed) | < 3s | PreWarmPool.get() < 100ms; success criteria table | YES |
+| NFR-002 | Time to first response (cold start) | < 35s | Cold start fallback with progress UI | YES |
+| NFR-003 | AG-UI event delivery latency | < 200ms | Direct FastAPI SSE streaming from SDK events | YES |
+| NFR-004 | OpenAI API first chunk latency | < 3s | Pre-warmed session; success criteria table | YES |
+| NFR-005 | Session crash rate | < 0.1% | SubprocessMonitor with graceful restart | YES |
+| NFR-006 | Uptime (business hours) | > 99.5% | Health checks; auto-restart via container runtime | YES |
+| NFR-007 | Graceful shutdown success | 100% | Phase 3 (US-016); not in MVP scope | DEFERRED (Phase 3) |
+| NFR-008 | Concurrent sessions per 16GB | Up to 10 | SessionManager max_sessions=10; success criteria | YES |
+| NFR-009 | Pre-warm pool replenishment | < 60s | PreWarmPool.replenish() background task | YES |
+| NFR-010 | Network-level access only for MVP | No auth | G-009 enforced; no auth middleware | YES |
+| NFR-011 | Subprocess sandbox | Bash commands sandboxed | SDK handles sandbox; OptionsBuilder sets permission_mode | YES |
+| NFR-012 | Docker build time | < 5 min | Multi-stage Dockerfile; standard build | YES |
+| NFR-013 | Time from docker run to first chat | < 90s | Success criteria table | YES |
+| NFR-014 | Session index file I/O | < 10ms | JSONSessionIndex atomic write; simple JSON | YES |
+| NFR-015 | Session index concurrent access | Safe under low contention | filelock library; atomic write pattern | YES |
 
-**Coverage**: 4/4 scenarios (100%)
-
----
-
-### Acceptance Scenario Coverage: US-007 (Error Messages with Context)
-
-| Scenario | Given/When/Then | Test in tasks_details? | Task | Status |
-|----------|-----------------|------------------------|------|--------|
-| API 429 | Given API 429, Then "AI service temporarily busy, retrying..." | test_rate_limit_translation | TASK-018 | ✅ COVERED |
-| Tool failure | Given tool failure, Then ToolUseCard shows error, Claude explains | Frontend: ToolUseCard error + backend stream_error | TASK-018, TASK-026 | ✅ COVERED |
-| Session terminated | Given session terminated (memory), Then "Restarted for performance, conversation preserved" | test_memory_restart_translation | TASK-018 | ✅ COVERED |
-| Permission denied | Given action lacks permission, Then specific permission error | Deferred to Phase 2 (RBAC) | N/A | ⚠️ Phase 1 N/A |
-
-**Coverage**: 3/3 scenarios for Phase 1 (100% for in-scope scenarios)
+**Result**: 13/15 aligned (2 are Phase 2+/Phase 3 scope, correctly deferred).
 
 ---
 
-### Field-Level Alignment: US-001 (Pre-Warmed Session Start)
+## Pass 4: User Story Alignment
 
-**Key Fields from Story**:
-- session_id (UUID)
-- pool_size (int)
-- pool_depth (int)
-- init_duration_seconds (float)
-- session_status (enum: pre-warmed|cold|active|idle|terminated)
+Each Phase 1 user story's acceptance scenarios verified against plan.
 
-| Story Key Field | Type (from spec) | Asserted in Test? | Assertion Quality | Status |
-|----------------|-------------------|-------------------|-------------------|--------|
-| session_id | UUID | Yes (len == 36, UUID format) | Strong | ✅ PASS |
-| pool_size | int | Yes (config validation) | Strong | ✅ PASS |
-| pool_depth | int | Yes (exact count) | Strong | ✅ PASS |
-| init_duration_seconds | float | Yes (< 60s timeout) | Strong | ✅ PASS |
-| session_status | enum | Yes (exact match "active") | Strong | ✅ PASS |
+| US-ID | Story | Acceptance Scenarios Covered | Plan Component | Aligned? |
+|---|---|---|---|---|
+| US-001 | Pre-Warmed Session Start | 4/4: pool assigned < 3s; cold start fallback; pool replenish; startup failure | PreWarmPool + SessionManager | YES |
+| US-002 | Chat Conversation via AG-UI | 4/4: send message; text events; run finished; run error | AG-UI Endpoint + chatStore | YES |
+| US-003 | Tool Use Transparency | 4/4: tool start card; tool end result; tool error; multiple tools | AG-UI ToolCall events + ToolUseCard | YES |
+| US-004 | Session Memory and Duration Limits | 5/5: duration warning; terminate no-query; terminate mid-query; RSS restart; zombie cleanup | SubprocessMonitor | YES |
+| US-005 | Chat Input and Controls | 4/4: Enter to send; interrupt shortcut; empty prevention; responsive input | InputBar + AG-UI cancel action | YES |
+| US-006 | Session Resume | 4/4: close browser persists; resume with history; corrupted fallback; session list | JSONSessionIndex + resume parameter | YES |
+| US-007 | Error Messages with Context | 3/3: rate limit translated; tool error in card; memory restart message | AG-UI events + ErrorBanner | YES |
+| US-008 | OpenAI-Compliant Streaming API | 4/4: streaming SSE; non-streaming JSON; tool calls in stream; error format | OpenAI Endpoint + Adapter | YES |
+| US-009 | REST API for Session Management | 5/5: list sessions; create session; capacity 503; health ready; no auth | REST Endpoints (Section 4.1) | YES |
+| US-010 | File-Based Extension Loading | 4/4: mcp.json loaded; skills discovered; invalid JSON graceful; hot-detection | ExtensionLoader | YES |
+| US-011 | Tool Approval via AG-UI | 3/3: approval dialog; approve executes; reject skips | ApprovalDialog + AG-UI resume | YES |
 
-**Assessment**: All key fields have strong assertions validating exact values or types.
-
----
-
-### Field-Level Alignment: US-002 (Streaming Chat Conversation)
-
-**Key Fields from Story**:
-- message_id (UUID)
-- message_type (enum)
-- content (string)
-- timestamp (ISO 8601)
-- cost_usd (float)
-- is_streaming (boolean)
-- sequence_number (int)
-
-| Story Key Field | Type (from spec) | Asserted in Test? | Assertion Quality | Status |
-|----------------|-------------------|-------------------|-------------------|--------|
-| message_id | UUID | Implied by session_id pattern | Medium | ⚠️ WARN |
-| message_type | enum | Yes (exact type strings) | Strong | ✅ PASS |
-| content | string | Yes (delta text content) | Strong | ✅ PASS |
-| timestamp | ISO 8601 | Yes (created_at/last_active_at format) | Strong | ✅ PASS |
-| cost_usd | float | Yes (exact value, >=0) | Strong | ✅ PASS |
-| is_streaming | boolean | Implied by streamingStore state | Medium | ⚠️ WARN |
-| sequence_number | int | Yes (seq field in messages) | Strong | ✅ PASS |
-
-**Assessment**: Most fields have strong assertions. Two fields (message_id, is_streaming) have medium-strength assertions (implied by related state rather than explicit validation).
-
-**Recommendation**: Consider adding explicit assertions for message_id format and is_streaming boolean in frontend tests.
+**Result**: 11/11 Phase 1 user stories fully aligned (all acceptance scenarios covered).
 
 ---
 
-### Field-Level Alignment: US-004 (Session Memory Limits)
+## Pass 5: Edge Case Coverage
 
-**Key Fields from Story**:
-- session_id (UUID)
-- subprocess_pid (int)
-- rss_bytes (int)
-- created_at (timestamp)
-- last_active_at (timestamp)
-- max_duration_seconds (int)
-- max_rss_bytes (int)
-- session_state (enum)
+All 36 HIGH risk edge cases from edge-case-resolutions.md verified.
 
-| Story Key Field | Type (from spec) | Asserted in Test? | Assertion Quality | Status |
-|----------------|-------------------|-------------------|-------------------|--------|
-| session_id | UUID | Yes (len == 36) | Strong | ✅ PASS |
-| subprocess_pid | int | Yes (positive int) | Strong | ✅ PASS |
-| rss_bytes | int | Yes (exact value > 0) | Strong | ✅ PASS |
-| created_at | timestamp | Yes (ISO 8601 regex) | Strong | ✅ PASS |
-| last_active_at | timestamp | Yes (ISO 8601, > created_at) | Strong | ✅ PASS |
-| max_duration_seconds | int | Yes (config default == 14400) | Strong | ✅ PASS |
-| max_rss_bytes | int | Yes (config default == 2048 * 1024^2) | Strong | ✅ PASS |
-| session_state | enum | Yes (exact match to defined states) | Strong | ✅ PASS |
+### Session Lifecycle (10/10)
 
-**Assessment**: All key fields have strong assertions with exact value checks.
+| EC-ID | Covered In | Aligned? |
+|---|---|---|
+| EC-001 | PreWarmPool.get() returns None -> cold start fallback | YES |
+| EC-003 | SubprocessMonitor.check_duration() -> 30s grace period | YES |
+| EC-004 | SubprocessMonitor.check_rss() -> graceful restart after query | YES |
+| EC-007 | SessionManager.resume_session() -> try/except, fresh session | YES |
+| EC-010 | SessionManager enforces one run per session (G-003) | YES |
+| EC-014 | PreWarmPool.replenish() -> 5-min backoff | YES |
+| EC-022 | PreWarmPool.fill() -> fail startup if all fail | YES |
+| EC-023 | SubprocessMonitor.check_disk() -> cleanup, restart at 100% | YES |
+| EC-098 | Platform startup -> validate API key first | YES |
+| EC-NEW-001 | JSONSessionIndex.init() -> create dir + empty file | YES |
 
----
+### AG-UI Communication (5/5)
 
-### Story Alignment Summary
+| EC-ID | Covered In | Aligned? |
+|---|---|---|
+| EC-NEW-002 | AG-UI endpoint aborts run on client disconnect | YES |
+| EC-NEW-003 | Truncate tool result > 1MB; REST fallback | YES |
+| EC-NEW-004 | Reject concurrent run with AG-UI error event | YES |
+| EC-NEW-005 | Idempotent cancel; ignore if run already done | YES |
+| EC-NEW-006 | Custom events with well-defined payload schema | YES |
 
-**Overall Coverage**:
-- **Stories with phases**: 7/7 (100%)
-- **Scenarios with tests**: 29/29 (100%)
-- **Key fields with assertions**: 20/22 (91%)
+### OpenAI-Compliant API (3/3)
 
-**Warnings**:
-1. **US-002 message_id field** - Implied by session_id pattern rather than explicit validation (MEDIUM priority)
-2. **US-002 is_streaming field** - Implied by streamingStore state rather than explicit boolean check (MEDIUM priority)
+| EC-ID | Covered In | Aligned? |
+|---|---|---|
+| EC-NEW-007 | Return 503 with Retry-After, OpenAI error format | YES |
+| EC-NEW-008 | Ignore unsupported parameters silently | YES |
+| EC-NEW-009 | SSE error event + [DONE] sentinel on termination | YES |
 
-**Recommendations**:
-1. Add explicit `message_id` format test in TASK-009 (WebSocket message type definitions)
-2. Add explicit `isStreaming` boolean assertion in TASK-020 (Zustand stores) tests
+### Session Index - JSON Files (3/3)
 
----
+| EC-ID | Covered In | Aligned? |
+|---|---|---|
+| EC-NEW-010 | File locking via filelock + atomic write | YES |
+| EC-NEW-011 | .bak recovery or re-create empty | YES |
+| EC-NEW-012 | Periodic cleanup (30-day retention) | YES |
 
-## Pass 1: Requirement Coverage
+### Extension System (5/5)
 
-### Requirement Inventory
+| EC-ID | Covered In | Aligned? |
+|---|---|---|
+| EC-NEW-013 | Re-scan on new session; active sessions unaffected | YES |
+| EC-NEW-014 | SDK reports error; that server unavailable; others work | YES |
+| EC-NEW-015 | SDK ignores malformed skills; logged | YES |
+| EC-069 | Phase 1: operator-trusted; logged; Phase 2: subprocess isolation | YES |
+| EC-116 | Env var blocklist (LD_PRELOAD, PATH, etc.) | YES |
 
-**Functional Requirements (FR) from feature-spec.md Section 3**:
+### Claude API / SDK (3/3)
 
-| Req ID | Requirement Text | Type | Priority |
-|--------|------------------|------|----------|
-| FR-001 | Session creation with pre-warming pool | Functional | P0 |
-| FR-002 | WebSocket chat endpoint | Functional | P0 |
-| FR-003 | Streaming token display | Functional | P0 |
-| FR-004 | Tool use transparency | Functional | P0 |
-| FR-005 | Session duration limits | Functional | P0 |
-| FR-006 | Memory monitoring (RSS) | Functional | P0 |
-| FR-007 | Subprocess cleanup | Functional | P0 |
-| FR-008 | React chat UI | Functional | P0 |
-| FR-009 | API key authentication | Functional | P0 |
-| FR-010 | Multiple concurrent sessions | Functional | P0 |
-| FR-010a | Session resume | Functional | P1 |
-| FR-011 | MCP server integration via mcp.json | Functional | P0 |
-| FR-011a | Skills integration via ./skills/ | Functional | P0 |
-| FR-011b | Custom commands via ./commands/ | Functional | P1 |
-| FR-011c | Extension hot-detection on session creation | Functional | P1 |
-| FR-012 | Docker containerization | Functional | P1 |
-| FR-013a | Error messages with context | Functional | P1 |
+| EC-ID | Covered In | Aligned? |
+|---|---|---|
+| EC-098 | Startup validation (duplicate with Session Lifecycle) | YES |
+| EC-100 | Phase 3 (global circuit breaker) | YES (deferred correctly) |
+| EC-107 | Phase 3 (adaptive rate limiting) | YES (deferred correctly) |
 
-**Non-Functional Requirements (NFR) from feature-spec.md Section 4**:
+### Subprocess Management (4/4)
 
-| NFR ID | Category | Requirement | Target |
-|--------|----------|------------|--------|
-| NFR-001 | Performance | Time to first response (pre-warmed) | < 3 seconds |
-| NFR-002 | Performance | Time to first response (cold start) | < 35 seconds |
-| NFR-003 | Performance | Streaming token latency | < 100ms per token |
-| NFR-008 | Scalability | Concurrent sessions per 16GB host | Up to 10 active sessions |
-| NFR-010 | Security | API key exposure | Zero secrets in logs |
+| EC-ID | Covered In | Aligned? |
+|---|---|---|
+| EC-114 | Handled by EC-004 (graceful restart) | YES |
+| EC-116 | Duplicate with Extension System | YES |
+| EC-121 | Handled by EC-023 (disk monitoring) | YES |
+| EC-125 | Phase 3 (post-session scrubbing) | YES (deferred correctly) |
 
----
+### Scaling / Deployment (3/3)
 
-### Coverage Matrix
+| EC-ID | Covered In | Aligned? |
+|---|---|---|
+| EC-132 | Phase 3 (session affinity) | YES (deferred correctly) |
+| EC-133 | Phase 3 (version compatibility) | YES (deferred correctly) |
+| EC-140 | Phase 3 (multi-factor readiness) | YES (deferred correctly) |
 
-| Requirement | Task(s) | TDD Spec? | Assertions? | Status |
-|-------------|---------|-----------|-------------|--------|
-| FR-001 | TASK-007 (PreWarmPool) | Yes | 6 assertions | ✅ Covered |
-| FR-002 | TASK-013 (WebSocket handler) | Yes | 5 assertions | ✅ Covered |
-| FR-003 | TASK-023 (MessageList, streaming) | Yes | 4 assertions | ✅ Covered |
-| FR-004 | TASK-023 (ToolUseCard) | Yes | 4 assertions | ✅ Covered |
-| FR-005 | TASK-008 (SubprocessMonitor duration) | Yes | 3 assertions | ✅ Covered |
-| FR-006 | TASK-008 (SubprocessMonitor RSS) | Yes | 4 assertions | ✅ Covered |
-| FR-007 | TASK-011 (SessionManager cleanup) | Yes | 4 assertions | ✅ Covered |
-| FR-008 | TASK-022, TASK-023, TASK-024, TASK-027 | Yes | 11 assertions (frontend) | ✅ Covered |
-| FR-009 | TASK-005 (API key auth) | Yes | 4 assertions | ✅ Covered |
-| FR-010 | TASK-010 (SessionManager multi-session) | Yes | 5 assertions | ✅ Covered |
-| FR-010a | TASK-012 (Session resume) | Yes | 3 assertions | ✅ Covered |
-| FR-011 | TASK-006 (ExtensionLoader mcp.json) | Yes | 4 assertions | ✅ Covered |
-| FR-011a | TASK-006 (ExtensionLoader skills) | Yes | 2 assertions | ✅ Covered |
-| FR-011b | TASK-006 (ExtensionLoader commands) | Yes | 1 assertion | ✅ Covered |
-| FR-011c | TASK-006 (ExtensionLoader hot-detection) | Yes | Implicit (re-read on call) | ✅ Covered |
-| FR-012 | TASK-017 (Dockerfile) | Yes | 3 assertions | ✅ Covered |
-| FR-013a | TASK-018, TASK-026 (Error translation) | Yes | 4 assertions | ✅ Covered |
-| NFR-001 | TASK-007 (PreWarmPool <100ms get) | Yes | 1 assertion | ✅ Covered |
-| NFR-002 | TASK-007 (PreWarmPool 60s timeout) | Yes | 1 assertion | ✅ Covered |
-| NFR-003 | TASK-013 (WebSocket streaming) | Yes | Implicit (async iterator) | ✅ Covered |
-| NFR-008 | TASK-010 (Capacity check MAX_SESSIONS=10) | Yes | 1 assertion | ✅ Covered |
-| NFR-010 | TASK-005 (API key not in logs) | Yes | 2 assertions | ✅ Covered |
-
-**Summary**:
-- **Total Requirements**: 22 (17 FR + 5 NFR in scope for Phase 1)
-- **Coverage**: 22/22 (100%)
-- **With TDD Specs**: 22/22 (100%)
-- **With Complete Assertions**: 22/22 (100%)
+**Result**: 36/36 HIGH risk edge cases aligned (Phase 1 cases fully covered; Phase 2+/3 cases correctly deferred).
 
 ---
 
-## Pass 2: Assertion Depth Validation
+## Pass 6: Guardrail Compliance
 
-### Assertion Quality Audit
+| Guardrail | Rule | Plan Enforcement | Aligned? |
+|---|---|---|---|
+| G-001 | All session operations include PID tracking | SubprocessMonitor.register(session_id, pid) on create | YES |
+| G-002 | Pre-warm pool blocks readiness probe until >= 1 slot | PreWarmPool.fill() blocks; readiness probe checks pool_depth | YES |
+| G-003 | AG-UI handler enforces one active run per session_id | SessionManager.is_run_active() check before query | YES |
+| G-003a | SessionManager supports multiple concurrent sessions | SessionManager manages dict of sessions; max 10 | YES |
+| G-003b | mcp.json, skills/, commands/ loaded same as Claude Code | ExtensionLoader matches Claude Code discovery mechanism | YES |
+| G-004 | Session index stored as JSON files, not database | JSONSessionIndex: JSON files only | YES |
+| G-005 | Session content persistence delegated to CLI subprocess | SDK manages JSONL files; platform does NOT read/write these | YES |
+| G-006 | Session duration capped (configurable, default 4h) | MAX_SESSION_DURATION_SECONDS=14400 default | YES |
+| G-007 | RSS monitoring triggers graceful restart, not hard kill | SubprocessMonitor: wait for query, then SIGTERM | YES |
+| G-008 | Frontend does NOT display raw SDK errors | ErrorBanner translates errors to actionable messages | YES |
+| G-009 | No authentication in Phase 1 | No auth middleware; all endpoints open | YES |
+| G-010 | AG-UI event stream on FastAPI directly | AG-UI endpoint uses FastAPI StreamingResponse with EventEncoder | YES |
+| G-011 | OpenAI API follows standard format | Section 4.1: full OpenAI-compatible request/response contract | YES |
+| G-012 | Host has sufficient memory | 10 x ~1.5GB + ~2GB OS = ~17GB; documented as 16GB minimum | YES |
 
-| Task | Contract Fields | Assertions Defined | Weak Assertions | Status |
-|------|-----------------|-------------------|-----------------|--------|
-| TASK-001 | 5 dependencies, 5 directories | 8 | 0 | ✅ Complete |
-| TASK-002 | 18 message types, 3 data contracts | 21 | 0 | ✅ Complete |
-| TASK-003 | 13 config fields, 10 SessionMetadata fields, 18 message types | 41+ | 0 | ✅ Complete |
-| TASK-004 | 10 session table columns | 10 | 0 | ✅ Complete |
-| TASK-005 | API key header, 401 error | 5 | 0 | ✅ Complete |
-| TASK-006 | mcp_servers, skill_directories, commands | 7 | 0 | ✅ Complete |
-| TASK-007 | Pool interface (5 methods) | 8 | 0 | ✅ Complete |
-| TASK-008 | MonitorAction (5 types, 6 fields) | 11 | 0 | ✅ Complete |
-| TASK-009 | 18 message types | 18 | 0 | ✅ Complete |
-| TASK-010 | SessionState (7 fields), query iterator | 12 | 0 | ✅ Complete |
-| TASK-011 | MonitorAction processing (4 types) | 4 | 0 | ✅ Complete |
-| TASK-012 | Resume capability (3 scenarios) | 3 | 0 | ✅ Complete |
-| TASK-013 | WebSocket messages (5 client types, 13 server types) | 18 | 0 | ✅ Complete |
-| TASK-014 | REST endpoints (7 endpoints) | 7 | 0 | ✅ Complete |
-| TASK-015 | Application startup/shutdown | 4 | 0 | ✅ Complete |
-| TASK-016 | JSON logging (3 fields + secret filtering) | 3 | 0 | ✅ Complete |
-| TASK-017 | Docker build, healthcheck | 3 | 0 | ✅ Complete |
-| TASK-018 | Error translation (4 error types) | 4 | 0 | ✅ Complete |
-| TASK-019 | Idle timeout (3 scenarios) | 3 | 0 | ✅ Complete |
-| TASK-020 | Zustand stores (3 stores) | 3 | 0 | ✅ Complete |
-| TASK-021 | WebSocket client (4 behaviors) | 4 | 0 | ✅ Complete |
-| TASK-022 | SessionList (3 behaviors) | 3 | 0 | ✅ Complete |
-| TASK-023 | MessageList, message components (4 behaviors) | 4 | 0 | ✅ Complete |
-| TASK-024 | InputBar (4 behaviors) | 4 | 0 | ✅ Complete |
-| TASK-025 | StatusBar, AuthGate (3 behaviors) | 3 | 0 | ✅ Complete |
-| TASK-026 | ErrorMessage, SystemMessage (3 behaviors) | 3 | 0 | ✅ Complete |
-| TASK-027 | Full frontend integration (3 flows) | 3 | 0 | ✅ Complete |
-| TASK-028 | End-to-end integration (4 flows) | 4 | 0 | ✅ Complete |
-
-**Summary**:
-- **Total Tasks**: 28
-- **Tasks with TDD Specs**: 28/28 (100%)
-- **Tasks with Complete Assertions**: 28/28 (100%)
-- **Tasks with Weak Assertions**: 0/28 (0%)
-
-**No weak assertion patterns detected.** All assertions validate:
-- Exact values (not just existence)
-- Specific types and formats (UUID, ISO 8601, etc.)
-- Contract fields round-trip correctly
-- Error conditions produce specific error messages
-
-**Examples of Strong Assertions Found**:
-
-**TASK-003 (config_defaults_match_spec)**:
-```python
-ASSERT: config.PREWARM_POOL_SIZE == 2  # Exact value
-ASSERT: config.MAX_SESSIONS == 10  # Exact value
-ASSERT: config.MAX_SESSION_DURATION_SECONDS == 14400  # Exact value
-# NOT: assert config is not None (weak)
-```
-
-**TASK-004 (save_and_get_roundtrip)**:
-```python
-ASSERT: retrieved.session_id == saved.session_id  # Exact match
-ASSERT: retrieved.user_id == saved.user_id  # Exact match
-# All 10 fields validated individually
-# NOT: assert retrieved is not None (weak)
-```
-
-**TASK-008 (check_warns_at_90_percent_duration)**:
-```python
-ASSERT: len(actions) == 1  # Exact count
-ASSERT: actions[0].type == "warn_duration"  # Exact type
-ASSERT: actions[0].remaining_seconds == expected_value  # Exact value
-# NOT: assert actions is not None (weak)
-# NOT: assert len(actions) >= 1 (weak)
-```
+**Result**: 12/12 guardrails enforced.
 
 ---
 
-## Pass 3: Anti-Pattern Signal Detection
+## Pass 7: Control Flow Alignment
 
-### Anti-Pattern Signals Detected
+Each control flow document verified against architecture.
 
-**Result**: No anti-pattern signals detected.
+| Control Flow | Steps in Spec | Steps in Plan | Aligned? | Notes |
+|---|---|---|---|---|
+| US-001 (Session Start) | 6 success + 4 EC branches | All mapped to PreWarmPool + SessionManager + JSONSessionIndex | YES | Pool assignment, cold start fallback, index update, replenish |
+| US-002 (Streaming Chat) | 6 success + 5 EC branches | All mapped to AG-UI Endpoint + SessionManager + SDK | YES | Message send, text events, tool events, run finish, interrupt |
+| US-004 (Session Limits) | Duration (4 steps) + Memory (5 steps) + 4 EC branches | All mapped to SubprocessMonitor + AG-UI custom events | YES | RSS check, duration check, zombie cleanup, disk check |
+| US-008 (OpenAI API) | 6 streaming + 2 non-streaming + 4 EC branches | All mapped to OpenAI Endpoint + Adapter + SessionManager | YES | Request parse, session acquire, SSE stream, [DONE] sentinel |
 
-**Analysis**:
-
-Scanned all task descriptions and strategy declarations in `tasks_details.md` for the following anti-pattern signals:
-
-| Signal Phrase | Anti-Pattern | Detected? |
-|--------------|--------------|-----------|
-| "regex", "regular expression", "pattern match" | Brittle parsing | No |
-| "hardcode", "hard-code", "constant string" | Inflexible design | No |
-| "catch all", "except Exception", "generic error" | Poor error handling | No |
-| "global", "singleton", "shared state" | Hidden dependencies | No |
-| "string concatenation" for queries | SQL injection risk | No |
-| "mock", "mocking" (for internal logic) | Over-mocking | No (only external APIs) |
-
-**Positive Patterns Found**:
-
-1. **Structured Config**: All configuration uses Pydantic models (TASK-003), not hardcoded values
-2. **Parameterized Queries**: SQLite operations use parameterized queries (TASK-004), not string concatenation
-3. **Specific Exceptions**: Error handling uses typed Pydantic ValidationError, not generic Exception catch-all
-4. **Dependency Injection**: SessionManager receives dependencies via constructor (TASK-010), not globals
-5. **Real Data Testing**: TDD specs explicitly state "real aiosqlite database (tmpdir, not mocked)" (TASK-004)
-6. **Enum Types**: Status fields use enums (SessionStatus), not magic strings
-
-**Strategic Patterns Observed**:
-
-- **TASK-006 (ExtensionLoader)**: Uses JSON parsing for mcp.json (structured data), not regex
-- **TASK-008 (SubprocessMonitor)**: Reads RSS from `/proc/<pid>/status` (structured format), not regex parsing
-- **TASK-018 (Error translation)**: Maps specific error types to messages, not generic "something went wrong"
+**Result**: 4/4 control flows fully aligned.
 
 ---
 
-## Pass 4: Strategy Declaration Completeness
+## Pass 8: Open Question Resolution
 
-### Strategy Declaration Status
+| OQ-ID | Question | Resolution in Plan | Status |
+|---|---|---|---|
+| OQ-001 | Should pool invalidate on extension config change? | ExtensionLoader re-scans per session; pool not invalidated (existing sessions keep old config) | ANSWERED (Decision 5 in decision-log.md) |
+| OQ-002 | AG-UI custom event types for platform notifications? | 4 custom events defined: session_warning, session_terminated, session_restarting, session_resumed | ANSWERED (Section 4.2) |
+| OQ-003 | OpenAI API vs Claude-specific features? | Tools passed via standard OpenAI tool format; MCP tool names exposed as-is | ANSWERED (Section 4.1) |
+| OQ-004 | Session index: one file per user vs per session? No auth = no user concept | Single index.json file with array of all sessions (no user concept in Phase 1) | ANSWERED (Section 5) |
+| OQ-005 | AG-UI error format for session failures? | Custom events with type + reason + message + resume_session_id | ANSWERED (Section 4.2) |
+| OQ-006 | OpenAI API: function calling format? | Standard OpenAI function calling format (choices[].delta.tool_calls) | DEFERRED (detailed format in implementation) |
+| OQ-007 | Human-in-the-loop + OpenAI API interaction? | OpenAI API sessions do not support HITL (tools auto-execute); AG-UI only | DEFERRED (needs implementation decision) |
 
-| Task Group | Strategy Declared? | Anti-Patterns Listed? | Rationale Provided? | Status |
-|------------|-------------------|----------------------|---------------------|--------|
-| Phase 1: Setup (2 tasks) | Yes | Yes | Yes | ✅ Complete |
-| Phase 2: Foundational (5 tasks) | Yes | Yes | Yes | ✅ Complete |
-| Phase 3: US-001 Backend (6 tasks) | Yes | Yes | Yes | ✅ Complete |
-| Phase 3: US-001 Frontend (3 tasks) | Yes | Yes | Yes | ✅ Complete |
-| Phase 4: US-002/003/005 (3 tasks) | Yes | Yes | Yes | ✅ Complete |
-| Phase 5: US-004 (2 tasks) | Yes | Yes | Yes | ✅ Complete |
-| Phase 6: US-006 (2 tasks) | Yes | Yes | Yes | ✅ Complete |
-| Phase 7: US-007 (2 tasks) | Yes | Yes | Yes | ✅ Complete |
-| Phase 8: Polish (3 tasks) | Yes | Yes | Yes | ✅ Complete |
-
-**Total Groups**: 9 (organized by phase)
-**Groups with Complete Strategy**: 9/9 (100%)
+**Result**: 5/7 answered in plan; 2 deferred to implementation (non-blocking).
 
 ---
 
-### Strategy Details by Phase
+## Identified Gaps and Recommendations
 
-**Phase 1-2: Setup & Foundational**
-- **Approach**: Pydantic models for all data contracts, aiosqlite for persistence, structlog for logging
-- **Anti-Patterns Avoided**: Hardcoded config values (use env vars), magic strings (use enums), mocking file I/O (use tmpdir with real files)
-- **Rationale**: Foundation layer must be solid; Pydantic provides validation, aiosqlite is zero-dependency for MVP
+### Gap 1: OQ-006 -- OpenAI function calling detail
 
-**Phase 3: US-001 (Pre-Warmed Session Start)**
-- **Approach**: asyncio.Queue for pre-warm pool, ClaudeSDKClient lifecycle management, ExtensionLoader hot-detection
-- **Anti-Patterns Avoided**: Lazy loading (causes latency), blocking startup (fails fast if no pre-warms succeed), hidden dependencies (explicit DI in SessionManager)
-- **Rationale**: Pre-warming is the core value proposition; must be non-blocking for pool operations but blocking for startup validation
+**Severity**: Low
+**Description**: The exact mapping between Claude tool_use blocks and OpenAI function calling format is documented at high level but the serialization details (index field, partial arguments streaming) need to be specified during implementation.
+**Recommendation**: Address during OpenAI Adapter implementation. Reference claude-code-openai-wrapper patterns.
 
-**Phase 4-7: User Story Features**
-- **Approach**: React 19 + Zustand for frontend state, WebSocket for streaming (not SSE), TDD with integration tests
-- **Anti-Patterns Avoided**: Full-store subscriptions in Zustand (use selectors), mocking internal components (test full tree), generic error messages (translate to actionable)
-- **Rationale**: Streaming requires persistent connection (WebSocket); Zustand is simpler than Redux for this use case
+### Gap 2: OQ-007 -- Human-in-the-loop via OpenAI API
 
-**Phase 8: Polish**
-- **Approach**: Multi-stage Docker build, integration tests with real database, App.tsx composition
-- **Anti-Patterns Avoided**: Unit tests for components (use integration tests), separate Docker images for frontend/backend (use multi-stage)
-- **Rationale**: Integration tests provide higher confidence than unit tests; single Docker image simplifies deployment
+**Severity**: Low
+**Description**: The OpenAI chat completions format has no concept of human-in-the-loop approval. The plan does not specify behavior when a tool requiring approval is invoked via the OpenAI API.
+**Recommendation**: For Phase 1, OpenAI API sessions should use `permission_mode="auto"` (all tools auto-approved). Document this as a known limitation. Phase 2 can explore extending the API with custom headers for approval flows.
+
+### Gap 3: NFR-007 -- Graceful shutdown
+
+**Severity**: Low
+**Description**: Graceful shutdown (SIGTERM handling, drain active sessions) is specified as Phase 3 (US-016) but not included in Phase 1 plan.
+**Recommendation**: Correctly deferred. Phase 1 relies on container runtime restart. No action needed.
 
 ---
 
-## Pass 5: Terminology Consistency
+## Conclusion
 
-### Terminology Audit
+The architecture plan is **fully aligned** with all specification documents:
 
-| Concept | Term in Spec | Term in Tasks | Term in Contract | Consistent? |
-|---------|--------------|---------------|------------------|-------------|
-| User account | "user" | "user_id" | "user_id" | ✅ Yes |
-| Chat session | "session" | "session" | "Session" | ✅ Yes |
-| Session identifier | "session_id" | "session_id" | "session_id" | ✅ Yes |
-| WebSocket connection | "WebSocket" | "WebSocket" | "WebSocket" | ✅ Yes |
-| AI response | "message", "response" | "message" | "AssistantMessage" | ✅ Yes (context-appropriate) |
-| Tool execution | "tool use" | "tool_use", "tool invocation" | "ToolUseBlock" | ✅ Yes |
-| Configuration file | "mcp.json" | "mcp.json" | "mcp.json" | ✅ Yes |
-| Session subprocess | "subprocess", "CLI subprocess" | "subprocess" | "subprocess_pid" | ✅ Yes |
-| Memory measurement | "RSS", "memory" | "RSS", "rss_bytes" | "rss_mb" | ✅ Yes (unit conversion noted) |
-| Session state | "status", "state" | "status", "state" | "SessionStatus" (enum) | ✅ Yes (context-appropriate) |
-| Pre-warm pool | "pre-warm pool", "pre-warming pool" | "PreWarmPool" | "PreWarmPool" | ✅ Yes |
-| Extension types | "MCP servers", "skills", "commands" | Same | Same | ✅ Yes |
+- **10/10** ADR decisions enforced
+- **18/18** Phase 1 functional requirements covered
+- **11/11** Phase 1 user stories with all acceptance scenarios addressed
+- **36/36** HIGH risk edge cases resolved (Phase 1 cases implemented, Phase 2+/3 correctly deferred)
+- **12/12** guardrails enforced
+- **4/4** control flows mapped to components
+- **3 low-severity gaps** identified, none blocking
 
-**Analysis**:
-- **No terminology drift detected**
-- **Context-appropriate variation**: "message" (user-facing) vs "AssistantMessage" (code type) is intentional and clear
-- **Unit conversions documented**: RSS measured in bytes internally, MB for config/display (conversion factor explicit)
-
-**Minor Observation**:
-- "Session state" vs "Session status" used interchangeably in natural language descriptions but consistently distinguished in code:
-  - `SessionState` (code model) = in-memory runtime state (client, pid, is_query_active)
-  - `SessionStatus` (enum) = lifecycle stage (creating, active, idle, terminated)
-  - This distinction is **intentional and appropriate** per architecture.md Section 6.1
+**Verdict: PASS -- Architecture plan is ready for task breakdown.**
 
 ---
 
-## Pass 6: Edge Case to Task Coverage
-
-### Edge Case Task Coverage
-
-**Source**: `specs/edge-case-resolutions.md` (38 HIGH risk cases, 37 resolved, 1 pending)
-
-| EC-ID | Risk Level | Design Decision | Task Coverage | Test Coverage | Status |
-|-------|------------|-----------------|---------------|---------------|--------|
-| EC-001 | HIGH | Pre-warm pool empty → cold start fallback | TASK-007 | test_get_returns_none_when_empty | ✅ Covered |
-| EC-003 | HIGH | Session duration reaches max mid-query | TASK-008, TASK-011 | test_terminate_duration_waits_for_in_flight | ✅ Covered |
-| EC-004 | HIGH | RSS memory exceeds threshold mid-query | TASK-008, TASK-011 | test_check_restarts_on_memory_threshold | ✅ Covered |
-| EC-007 | HIGH | Resume with corrupted SDK session data | TASK-012 | test_resume_corrupted_data_fallback | ✅ Covered |
-| EC-010 | HIGH | Same session in multiple browser tabs | TASK-013 | connection deduplication (G-003) | ✅ Covered |
-| EC-014 | HIGH | API rate limit during pre-warm | TASK-007 | backoff logic in replenish() | ✅ Covered |
-| EC-016 | HIGH | JWT expires during active WebSocket | Phase 2 | N/A (Phase 2 feature) | ⚠️ Deferred |
-| EC-018 | HIGH | Pre-warmed session has stale plugin config | TASK-007 | pool invalidation on config change | ✅ Covered |
-| EC-022 | HIGH | All pre-warm attempts fail on startup | TASK-007 | test_startup_fill_returns_false_all_fail | ✅ Covered |
-| EC-023 | HIGH | Cache directory exceeds disk quota | TASK-008 | Disk monitoring (Phase 1 operational) | ⚠️ Partial (monitoring only) |
-| EC-033 | HIGH | Two tabs send messages to same session | TASK-013 | Handled by EC-010 resolution | ✅ Covered |
-| EC-036 | HIGH | Reconnection with message sequence gap | Phase 2 | N/A (Phase 2 feature) | ⚠️ Deferred |
-| EC-044 | HIGH | Message buffer grows unbounded | Phase 2 | N/A (Phase 2 feature) | ⚠️ Deferred |
-| EC-050 | HIGH | Server sends very large tool_result (10MB+) | Phase 2 | N/A (Phase 2 feature) | ⚠️ Deferred |
-| EC-059 | HIGH | Two plugins declare tools with same name | Phase 2 | N/A (Phase 2 PluginRegistry) | ⚠️ Deferred |
-| EC-060 | HIGH | Plugin activated while sessions active | Phase 2 | N/A (Phase 2 PluginRegistry) | ⚠️ Deferred |
-| EC-064 | HIGH | SKILL.md file deleted from filesystem | Phase 2 | N/A (Phase 2 filesystem watcher) | ⚠️ Deferred |
-| EC-067 | HIGH | Plugin secret becomes invalid mid-session | Phase 2 | N/A (Phase 2 secret management) | ⚠️ Deferred |
-| EC-069 | HIGH | Tool plugin calls external API without permission | Phase 2 | N/A (Phase 2 permission system) | ⚠️ Deferred |
-| EC-071 | HIGH | Plugin secret encrypted with rotated SECRET_KEY | Phase 2 | N/A (Phase 2 secret management) | ⚠️ Deferred |
-| EC-073 | HIGH | Plugin registry database corrupted | Phase 2 | N/A (Phase 2 PluginRegistry) | ⚠️ Deferred |
-| EC-075 | HIGH | Plugin hot reload during active session | Phase 2 | **PENDING DECISION** | ⚠️ Deferred + Pending |
-| EC-084 | HIGH | Two PreToolUse hooks disagree (Allow vs Deny) | Phase 2 | N/A (Phase 2 hooks) | ⚠️ Deferred |
-| EC-087 | HIGH | Bash command with dangerouslyDisableSandbox=true | Phase 2 | N/A (Phase 2 PermissionGate) | ⚠️ Deferred |
-| EC-093 | HIGH | Prompt injection via tool input | Phase 3 | N/A (Phase 3 security) | ⚠️ Deferred |
-| EC-094 | HIGH | Sandbox escape attempt detected | Phase 3 | N/A (Phase 3 security) | ⚠️ Deferred |
-| EC-098 | HIGH | Invalid API key on startup | TASK-015 | API key validation in startup sequence | ✅ Covered |
-| EC-100 | HIGH | Multiple sessions hit API rate limit (429) | Phase 3 | N/A (Phase 3 circuit breaker) | ⚠️ Deferred |
-| EC-107 | HIGH | Account-level API rate limit reached | Phase 3 | N/A (Phase 3 rate limiting) | ⚠️ Deferred |
-| EC-114 | HIGH | CLI subprocess RSS reaches OOM threshold | TASK-008, TASK-011 | Handled by EC-004 resolution | ✅ Covered |
-| EC-116 | HIGH | Environment variable injection via plugin | Phase 2 | N/A (Phase 2 plugin security) | ⚠️ Deferred |
-| EC-121 | HIGH | Filesystem full in subprocess | TASK-008 | Handled by EC-023 resolution | ⚠️ Partial (monitoring only) |
-| EC-125 | HIGH | Subprocess writes sensitive data to ~/.claude/ | Phase 3 | N/A (Phase 3 post-session scrubbing) | ⚠️ Deferred |
-| EC-129 | HIGH | Database connection pool exhausted | Phase 3 | N/A (Phase 3 scalability) | ⚠️ Deferred |
-| EC-132 | HIGH | Load balancer routes to wrong pod | Phase 3 | N/A (Phase 3 deployment) | ⚠️ Deferred |
-| EC-133 | HIGH | New deployment version incompatible with old session data | Phase 3 | N/A (Phase 3 deployment) | ⚠️ Deferred |
-| EC-135 | HIGH | Database unavailable during active sessions | Phase 3 | N/A (Phase 3 resilience) | ⚠️ Deferred |
-| EC-140 | HIGH | Health check false positive (alive but pool empty) | TASK-014 | /ready endpoint checks pool depth | ✅ Covered |
-
-**Summary**:
-- **Total HIGH Risk Edge Cases**: 38
-- **Phase 1 Coverage**: 10/10 Phase 1 cases covered (100%)
-- **Deferred to Phase 2-3**: 28 cases (documented in edge-case-resolutions.md)
-- **Pending Decision**: 1 case (EC-075 - plugin hot reload behavior)
-
-**Severity Assignment**:
-
-| Severity | Count | Examples |
-|----------|-------|----------|
-| COVERED | 10 | EC-001, EC-003, EC-004, EC-007, EC-010, EC-014, EC-018, EC-022, EC-098, EC-140 |
-| DEFERRED (Phase 2-3) | 27 | EC-016, EC-036, EC-044, EC-050, EC-059, EC-060, EC-064, EC-067, EC-069, EC-071, EC-073, EC-084, EC-087, EC-093, EC-094, EC-100, EC-107, EC-116, EC-125, EC-129, EC-132, EC-133, EC-135 |
-| PENDING DECISION | 1 | EC-075 (plugin hot reload - stakeholder input needed) |
-
-**No Critical Gaps**: All HIGH risk edge cases relevant to Phase 1 have corresponding task coverage and test assertions.
-
----
-
-## Critical Issues (BLOCK Implementation)
-
-**None identified.**
-
----
-
-## High Priority Issues
-
-**None identified.**
-
----
-
-## Warnings
-
-### W1: Story Field-Level Assertion Depth (US-002)
-
-- **Type**: Assertion Quality
-- **Severity**: MEDIUM
-- **Details**: Two fields in US-002 have medium-strength assertions instead of strong:
-  - `message_id`: Implied by session_id pattern (UUID) rather than explicit format validation
-  - `is_streaming`: Implied by streamingStore state rather than explicit boolean assertion
-- **Recommendation**:
-  1. Add explicit `message_id` format test in TASK-009 (WebSocket message types)
-  2. Add explicit `isStreaming` boolean assertion in TASK-020 (Zustand stores)
-- **Impact if Not Fixed**: Tests may miss edge cases where message_id format is incorrect or is_streaming state is undefined
-
----
-
-### W2: Edge Case EC-023 Partial Coverage (Disk Quota)
-
-- **Type**: Edge Case Coverage
-- **Severity**: MEDIUM
-- **Details**: EC-023 (cache directory exceeds disk quota) has monitoring via SubprocessMonitor but no proactive cleanup implementation in Phase 1
-- **Current State**: Disk usage alerting at 80% threshold (operational)
-- **Missing**: Automated cleanup of shell snapshots older than 24h
-- **Recommendation**: Add TASK-029 (Phase 1 or Phase 2) to implement proactive disk cleanup
-- **Rationale from edge-case-resolutions.md**: "Disk exhaustion is as dangerous as OOM. Proactive cleanup prevents it."
-- **Impact if Not Fixed**: Long-running platform may hit disk quota, causing session failures
-
----
-
-### W3: Edge Case EC-121 Partial Coverage (Filesystem Full)
-
-- **Type**: Edge Case Coverage
-- **Severity**: MEDIUM
-- **Details**: EC-121 (filesystem full in subprocess) is marked as "Handled by EC-023 resolution" but EC-023 itself has partial coverage (see W2)
-- **Current State**: No automated cleanup in Phase 1
-- **Recommendation**: Same as W2 - add proactive cleanup task
-- **Impact if Not Fixed**: Subprocess writes may fail due to full disk
-
----
-
-### W4: Constitution Not Established
-
-- **Type**: Project Governance
-- **Severity**: LOW
-- **Details**: No `.sdlc/constitution.md` file found. Constitution defines immutable project principles (MUST/SHOULD/MAY)
-- **Recommendation**: Run `sdlc-constitution` to establish project principles before implementation phase
-- **Impact if Not Implemented**: Team operates on implicit assumptions instead of documented principles
-- **Mitigation**: Feature spec Section 5 (Constraints) and Section 6.3 (Agent Guardrails) provide interim guardrails
-
----
-
-### W5: Pending Edge Case Decision (EC-075)
-
-- **Type**: Edge Case Resolution
-- **Severity**: LOW
-- **Details**: EC-075 (plugin hot reload during active session) marked as "PENDING DECISION" with three options:
-  - Option A: Block hot reload if sessions active
-  - Option B: Force-disconnect affected sessions with warning
-  - Option C: Active sessions use old version, new sessions use new version (RECOMMENDED)
-- **Blocker**: Need stakeholder confirmation on whether "emergency disable" (Option B) is ever needed
-- **Recommendation**: Resolve before Phase 2 implementation starts
-- **Impact if Not Resolved**: Phase 2 PluginRegistry may need rework if decision changes
-- **Deferred to**: Phase 2 (not blocking Phase 1)
-
----
-
-## Next Actions
-
-### If Proceeding to Implementation (RECOMMENDED)
-
-✅ **All validations passed. Safe to proceed.**
-
-1. **Review Warnings**: Address W1 and W2 (medium priority) if time permits before implementation
-2. **Start Implementation**: Run `sdlc-implement-feature --name core-engine`
-3. **Monitor During Implementation**:
-   - Verify assertion patterns remain strong (no existence-only assertions)
-   - Check for anti-pattern drift (regex parsing, hardcoded values)
-   - Validate strategy adherence (TDD RED-GREEN-REFACTOR)
-
-### If Addressing Warnings First
-
-1. **Add missing assertions** (W1):
-   - TASK-009: Add `message_id` UUID format validation test
-   - TASK-020: Add `isStreaming` boolean assertion test
-2. **Add disk cleanup task** (W2, W3):
-   - Create TASK-029: Implement proactive disk cleanup (delete snapshots >24h)
-   - Update edge-case-resolutions.md to mark EC-023, EC-121 as fully covered
-3. **Resolve pending decision** (W5):
-   - Confirm stakeholder preference for EC-075 plugin hot reload behavior
-   - Update edge-case-resolutions.md with final decision
-4. **Establish constitution** (W4):
-   - Run `sdlc-constitution` to document project principles
-   - Re-run this validator to check constitution compliance
-
-### If Critical Issues Existed (NONE FOUND)
-
-N/A - No critical issues detected.
-
----
-
-## Validation Methodology
-
-**Pass 0: Constitution Compliance**
-- Checked for `.sdlc/constitution.md` and `.sdlc/project-context.md`
-- Would validate MUST/SHOULD principles if constitution existed
-- Would check cross-feature consistency for technology drift
-
-**Pass 0.5: Story-Level Alignment**
-- Mapped all 7 user stories to task phases (task_groups.md)
-- Verified all 29 acceptance scenarios have test coverage (tasks_details.md)
-- Audited field-level assertions for 3 major stories (US-001, US-002, US-004)
-
-**Pass 1: Requirement Coverage**
-- Extracted 17 FR and 5 NFR from feature-spec.md
-- Mapped each requirement to tasks (tasks.md)
-- Verified TDD specifications exist (tasks_details.md)
-
-**Pass 2: Assertion Depth**
-- Analyzed all 28 tasks for assertion patterns
-- Checked for weak patterns (is not None, len >= 1, hasattr only)
-- Verified all assertions validate exact values or contract fields
-
-**Pass 3: Anti-Pattern Detection**
-- Scanned task descriptions for signal phrases (regex, hardcode, catch all, global, mock)
-- Verified strategic patterns (Pydantic, parameterized queries, DI, real data tests)
-
-**Pass 4: Strategy Completeness**
-- Verified all 9 task groups have declared strategy (task_groups.md)
-- Checked for approach, anti-patterns avoided, and rationale
-
-**Pass 5: Terminology Consistency**
-- Compared terminology across spec, tasks, and contracts
-- Identified intentional variations (message vs AssistantMessage)
-
-**Pass 6: Edge Case Coverage**
-- Loaded 38 HIGH risk edge cases from edge-case-resolutions.md
-- Mapped each to tasks and tests
-- Identified Phase 2-3 deferrals and pending decisions
-
----
-
-## Appendix: Constitution Compliance Template (For Future Use)
-
-**If `.sdlc/constitution.md` is created, run this validator again. Expected output:**
-
-```markdown
-## Constitution Compliance
-
-| # | Principle | Level | Tasks Address It? | Strategy Honors It? | Status |
-|---|-----------|-------|-------------------|---------------------|--------|
-| I | TDD Mandatory | MUST | Yes (all 28 tasks have TDD specs) | Yes (RED-GREEN in tasks_details) | PASS |
-| II | No GPL Dependencies | MUST | Yes (all MIT/Apache/BSD) | Yes (dependency audit in plan) | PASS |
-| III | Pydantic Validation | MUST | Yes (TASK-003, TASK-009) | Yes (all models use Pydantic) | PASS |
-| IV | 80% Coverage | SHOULD | Implied (TDD for all tasks) | Not explicitly declared | WARN |
-| V | Real Data Tests | MUST | Yes (TASK-004 "real aiosqlite") | Yes (no mocking internal logic) | PASS |
-```
-
----
-
-*End of Specification Alignment Report*
+*End of Alignment Report*
