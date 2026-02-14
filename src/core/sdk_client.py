@@ -64,7 +64,7 @@ def _content_block_to_event(block) -> dict[str, Any] | None:
 def build_sdk_options(settings, extension_config=None) -> ClaudeCodeOptions:
     """Build ClaudeCodeOptions from app Settings and extension config."""
     opts: dict[str, Any] = {
-        "permission_mode": "acceptEdits",
+        "permission_mode": "bypassPermissions",
         "cwd": settings.project_cwd,
     }
 

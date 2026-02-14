@@ -26,14 +26,20 @@ _DESCRIPTION_COMMENT_RE = re.compile(r"^#\s*Description:\s*(.+)$", re.MULTILINE)
 
 
 class ExtensionLoader:
-    """Discovers MCP servers, skills, and commands relative to a project directory."""
+    """Discovers MCP servers, skills, and commands from project and user directories.
 
-    def __init__(self, base_dir: str):
+    Mirrors Claude Code's resolution order:
+    1. Project-level: <project>/.claude/skills/, <project>/skills/, <project>/commands/
+    2. User-level:    ~/.claude/skills/, ~/.claude/commands/
+    """
+
+    def __init__(self, base_dir: str, user_dir: str | None = None):
         self._base_dir = base_dir
+        self._user_dir = user_dir if user_dir is not None else os.path.join(str(Path.home()), ".claude")
         self._skill_paths: dict[str, str] = {}
 
     def scan(self) -> ExtensionConfig:
-        """Scan the project directory for extensions. Returns ExtensionConfig."""
+        """Scan project and user directories for extensions. Returns ExtensionConfig."""
         config = ExtensionConfig()
         self._skill_paths.clear()
 
@@ -65,39 +71,49 @@ class ExtensionLoader:
         return content.strip()
 
     def _scan_mcp_json(self, config: ExtensionConfig) -> None:
-        """Parse mcp.json if present. Graceful on errors."""
-        mcp_path = os.path.join(self._base_dir, "mcp.json")
-        if not os.path.exists(mcp_path):
-            return
+        """Parse mcp.json from project and user dirs. Project takes priority."""
+        mcp_paths = [
+            os.path.join(self._base_dir, "mcp.json"),
+            os.path.join(self._base_dir, ".claude", "mcp.json"),
+            os.path.join(self._user_dir, "mcp.json"),
+        ]
 
-        try:
-            with open(mcp_path, "r") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, ValueError, OSError) as exc:
-            logger.warning("Failed to parse mcp.json: %s", exc)
-            return
+        for mcp_path in mcp_paths:
+            if not os.path.exists(mcp_path):
+                continue
 
-        servers = data.get("mcpServers", {})
-        for name, server_data in servers.items():
-            env = server_data.get("env", {})
-            sanitized_env = {
-                k: v for k, v in env.items() if k not in BLOCKED_ENV_VARS
-            }
-            config.mcp_servers[name] = MCPServerConfig(
-                name=name,
-                command=server_data.get("command", ""),
-                args=server_data.get("args", []),
-                env=sanitized_env,
-                transport=server_data.get("transport", "stdio"),
-                description=server_data.get("description"),
-            )
+            try:
+                with open(mcp_path, "r") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, ValueError, OSError) as exc:
+                logger.warning("Failed to parse %s: %s", mcp_path, exc)
+                continue
+
+            servers = data.get("mcpServers", {})
+            for name, server_data in servers.items():
+                if name in config.mcp_servers:
+                    continue  # project-level takes priority
+                env = server_data.get("env", {})
+                sanitized_env = {
+                    k: v for k, v in env.items() if k not in BLOCKED_ENV_VARS
+                }
+                config.mcp_servers[name] = MCPServerConfig(
+                    name=name,
+                    command=server_data.get("command", ""),
+                    args=server_data.get("args", []),
+                    env=sanitized_env,
+                    transport=server_data.get("transport", "stdio"),
+                    description=server_data.get("description"),
+                )
 
     def _scan_skills(self, config: ExtensionConfig) -> None:
         """Scan skill directories and extract metadata from SKILL.md."""
         skill_search_dirs = [
             os.path.join(self._base_dir, ".claude", "skills"),
             os.path.join(self._base_dir, "skills"),
+            os.path.join(self._user_dir, "skills"),
         ]
+        seen_names: set[str] = set()
 
         for search_dir in skill_search_dirs:
             if not os.path.isdir(search_dir):
@@ -112,14 +128,19 @@ class ExtensionLoader:
                 if not os.path.isfile(skill_md):
                     continue
 
-                # Track for read_skill_content
-                self._skill_paths[entry] = skill_dir
+                name, description = self._extract_skill_metadata(skill_md, entry)
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
 
-                # Use relative path from base_dir for the skill directory path
+                # Track for read_skill_content (both dir name and frontmatter name)
+                self._skill_paths[entry] = skill_dir
+                if name != entry:
+                    self._skill_paths[name] = skill_dir
+
                 rel_path = os.path.relpath(skill_dir, self._base_dir)
                 config.skill_directories.append(rel_path)
 
-                name, description = self._extract_skill_metadata(skill_md, entry)
                 config.skills.append(
                     SkillInfo(
                         name=name,
@@ -166,27 +187,36 @@ class ExtensionLoader:
         return name, description
 
     def _scan_commands(self, config: ExtensionConfig) -> None:
-        """Scan commands directory and extract metadata."""
-        commands_dir = os.path.join(self._base_dir, "commands")
-        if not os.path.isdir(commands_dir):
-            return
+        """Scan commands directories and extract metadata."""
+        commands_dirs = [
+            os.path.join(self._base_dir, "commands"),
+            os.path.join(self._user_dir, "commands"),
+        ]
+        seen_names: set[str] = set()
 
-        for entry in sorted(os.listdir(commands_dir)):
-            cmd_path = os.path.join(commands_dir, entry)
-            if not os.path.isfile(cmd_path):
+        for commands_dir in commands_dirs:
+            if not os.path.isdir(commands_dir):
                 continue
 
-            rel_path = os.path.relpath(cmd_path, self._base_dir)
-            description = self._extract_command_description(cmd_path)
+            for entry in sorted(os.listdir(commands_dir)):
+                cmd_path = os.path.join(commands_dir, entry)
+                if not os.path.isfile(cmd_path):
+                    continue
+                if entry in seen_names:
+                    continue
+                seen_names.add(entry)
 
-            config.commands.append(
-                CommandInfo(
-                    name=entry,
-                    description=description,
-                    path=rel_path,
-                    invoke_prefix=f"/{entry}",
+                rel_path = os.path.relpath(cmd_path, self._base_dir)
+                description = self._extract_command_description(cmd_path)
+
+                config.commands.append(
+                    CommandInfo(
+                        name=entry,
+                        description=description,
+                        path=rel_path,
+                        invoke_prefix=f"/{entry}",
+                    )
                 )
-            )
 
     def _extract_command_description(self, cmd_path: str) -> str:
         """Extract description from a command file.

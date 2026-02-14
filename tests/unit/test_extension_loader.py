@@ -19,7 +19,8 @@ def project_dir(tmp_path):
 
 @pytest.fixture
 def loader(project_dir):
-    return ExtensionLoader(str(project_dir))
+    # Use project_dir as user_dir too, to isolate from real ~/.claude/
+    return ExtensionLoader(str(project_dir), user_dir=str(project_dir / "_user_claude"))
 
 
 class TestScanEmptyDirectory:

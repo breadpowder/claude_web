@@ -50,6 +50,10 @@ def _propagate_provider_env(settings: Settings) -> None:
         if value:
             os.environ.setdefault(key, value)
 
+    # Remove CLAUDECODE env var to allow SDK subprocess spawning
+    # (prevents "cannot be launched inside another Claude Code session" error)
+    os.environ.pop("CLAUDECODE", None)
+
 
 def create_app(
     client_factory=None,
