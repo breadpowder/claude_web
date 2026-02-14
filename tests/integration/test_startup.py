@@ -137,6 +137,102 @@ class TestStartupSequence:
         assert sm.active_session_count() == 0
 
 
+class TestNestedSessionEnvCleanup:
+    """Test that CLAUDECODE env var is removed to prevent nested session errors."""
+
+    @pytest.mark.asyncio
+    async def test_claudecode_env_removed_on_startup(self, monkeypatch):
+        """create_app must unset CLAUDECODE so SDK subprocess won't refuse to start."""
+        import os
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+
+        assert os.environ.get("CLAUDECODE") is None
+
+    @pytest.mark.asyncio
+    async def test_claudecode_env_absent_stays_absent(self):
+        """If CLAUDECODE is not set, startup should not fail."""
+        import os
+        os.environ.pop("CLAUDECODE", None)
+
+        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+
+        assert os.environ.get("CLAUDECODE") is None
+
+
+class TestUserLevelExtensionLoading:
+    """Test that extensions are loaded from ~/.claude/ in addition to project dir."""
+
+    def test_user_skills_loaded_on_startup(self, tmp_path, monkeypatch):
+        """Startup should discover skills from ~/.claude/skills/."""
+        from starlette.testclient import TestClient
+
+        # Create a user-level skill
+        user_claude = tmp_path / "fake_user_claude"
+        skill_dir = user_claude / "skills" / "test-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: test-skill\ndescription: A test skill\n---\nDo something."
+        )
+
+        # Patch ExtensionLoader to use our fake user dir
+        original_init = ExtensionLoader.__init__
+
+        def patched_init(self, base_dir, user_dir=None):
+            original_init(self, base_dir, user_dir=str(user_claude))
+
+        monkeypatch.setattr(ExtensionLoader, "__init__", patched_init)
+
+        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/extensions")
+
+        skills = resp.json()["skills"]
+        skill_names = [s["name"] for s in skills]
+        assert "test-skill" in skill_names
+
+    def test_project_skills_override_user_skills(self, tmp_path, monkeypatch):
+        """Project-level skill with same name takes priority over user-level."""
+        from starlette.testclient import TestClient
+
+        # User-level skill
+        user_claude = tmp_path / "fake_user_claude"
+        user_skill = user_claude / "skills" / "dupe-skill"
+        user_skill.mkdir(parents=True)
+        (user_skill / "SKILL.md").write_text(
+            "---\nname: dupe-skill\ndescription: User version\n---\nUser body."
+        )
+
+        # Project-level skill with same name
+        project_dir = tmp_path / "project"
+        proj_skill = project_dir / ".claude" / "skills" / "dupe-skill"
+        proj_skill.mkdir(parents=True)
+        (proj_skill / "SKILL.md").write_text(
+            "---\nname: dupe-skill\ndescription: Project version\n---\nProject body."
+        )
+
+        monkeypatch.setenv("PROJECT_CWD", str(project_dir))
+
+        original_init = ExtensionLoader.__init__
+
+        def patched_init(self, base_dir, user_dir=None):
+            original_init(self, base_dir, user_dir=str(user_claude))
+
+        monkeypatch.setattr(ExtensionLoader, "__init__", patched_init)
+
+        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/extensions")
+
+        skills = resp.json()["skills"]
+        dupe_skills = [s for s in skills if s["name"] == "dupe-skill"]
+        assert len(dupe_skills) == 1
+        assert dupe_skills[0]["description"] == "Project version"
+
+
 class TestRouterRegistration:
     @pytest.mark.asyncio
     async def test_liveness_probe_always_available(self):

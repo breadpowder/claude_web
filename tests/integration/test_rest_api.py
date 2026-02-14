@@ -334,6 +334,69 @@ class TestExtensions:
         assert data["total_count"] == 0
 
 
+class TestUserLevelExtensions:
+    """Test that user-level extensions from ~/.claude/ appear in the API response."""
+
+    @pytest.mark.asyncio
+    async def test_user_skills_appear_in_extensions_response(self):
+        """Skills from ~/.claude/skills/ must appear in /api/v1/extensions."""
+        config = ExtensionConfig(
+            skills=[
+                SkillInfo(
+                    name="npm-review",
+                    description="Evaluate npm packages against security guidelines",
+                    path="../../.claude/skills/npm-review",
+                    invoke_prefix="/npm-review",
+                ),
+                SkillInfo(
+                    name="project-skill",
+                    description="A project skill",
+                    path=".claude/skills/project-skill",
+                    invoke_prefix="/project-skill",
+                ),
+            ],
+        )
+        app = _create_test_app(extension_config=config)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/v1/extensions")
+        data = resp.json()
+        skill_names = [s["name"] for s in data["skills"]]
+        assert "npm-review" in skill_names
+        assert "project-skill" in skill_names
+        assert data["total_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_user_and_project_skills_in_slash_commands(self):
+        """Both user and project skills must appear in all_slash_commands."""
+        config = ExtensionConfig(
+            skills=[
+                SkillInfo(
+                    name="npm-review",
+                    description="Review npm packages",
+                    path="../../.claude/skills/npm-review",
+                    invoke_prefix="/npm-review",
+                ),
+            ],
+            commands=[
+                CommandInfo(
+                    name="deploy",
+                    description="Deploy to staging",
+                    path="../../.claude/commands/deploy",
+                    invoke_prefix="/deploy",
+                ),
+            ],
+        )
+        app = _create_test_app(extension_config=config)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/v1/extensions")
+        data = resp.json()
+        slash_names = [s["name"] for s in data["all_slash_commands"]]
+        assert "npm-review" in slash_names
+        assert "deploy" in slash_names
+
+
 class TestNoAuth:
     @pytest.mark.asyncio
     async def test_endpoints_no_auth_required(self):

@@ -173,6 +173,99 @@ class TestCapacity:
         assert resp.headers["retry-after"] == "30"
 
 
+class TestSkillExpansion:
+    """Test that /skill-name prompts are expanded with SKILL.md content."""
+
+    @pytest.mark.asyncio
+    async def test_skill_prompt_expanded_in_chat(self):
+        """When user sends /skill-name args, the skill body is injected into the prompt."""
+        received_prompts = []
+
+        async def _query(session_id, prompt):
+            received_prompts.append(prompt)
+            yield {"type": "text", "content": "Skill executed"}
+
+        app = _create_test_app()
+        # Replace query to capture the prompt
+        app.state.session_manager.query = _query
+
+        # Set up prompt expander with a fake skill
+        from src.core.extension_loader import ExtensionLoader
+        from src.core.prompt_expander import PromptExpander
+        from src.core.models import ExtensionConfig, SkillInfo
+        import tempfile, os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = os.path.join(tmpdir, ".claude", "skills", "test-review")
+            os.makedirs(skill_dir)
+            with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
+                f.write("---\nname: test-review\ndescription: Review stuff\n---\nYou are a reviewer. Analyze the input.")
+
+            loader = ExtensionLoader(tmpdir, user_dir=os.path.join(tmpdir, "_no_user"))
+            ext_config = loader.scan()
+            expander = PromptExpander(loader)
+
+            app.state.prompt_expander = expander
+            app.state.extension_config = ext_config
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "claude",
+                        "messages": [{"role": "user", "content": "/test-review my-package"}],
+                        "stream": False,
+                    },
+                )
+
+        assert resp.status_code == 200
+        assert len(received_prompts) == 1
+        # The expanded prompt should contain the skill body, not the raw /command
+        assert "You are a reviewer" in received_prompts[0]
+        assert "my-package" in received_prompts[0]
+        assert received_prompts[0] != "/test-review my-package"
+
+    @pytest.mark.asyncio
+    async def test_unknown_slash_command_passes_through(self):
+        """Unknown /commands should pass through unchanged."""
+        received_prompts = []
+
+        async def _query(session_id, prompt):
+            received_prompts.append(prompt)
+            yield {"type": "text", "content": "OK"}
+
+        app = _create_test_app()
+        app.state.session_manager.query = _query
+
+        from src.core.extension_loader import ExtensionLoader
+        from src.core.prompt_expander import PromptExpander
+        import tempfile, os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            loader = ExtensionLoader(tmpdir, user_dir=os.path.join(tmpdir, "_no_user"))
+            ext_config = loader.scan()
+            expander = PromptExpander(loader)
+
+            app.state.prompt_expander = expander
+            app.state.extension_config = ext_config
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "claude",
+                        "messages": [{"role": "user", "content": "/nonexistent foo"}],
+                        "stream": False,
+                    },
+                )
+
+        assert resp.status_code == 200
+        assert len(received_prompts) == 1
+        assert received_prompts[0] == "/nonexistent foo"
+
+
 class TestToolCalls:
     @pytest.mark.asyncio
     async def test_tool_calls_in_sse_stream(self):
