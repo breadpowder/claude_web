@@ -266,6 +266,115 @@ class TestSkillExpansion:
         assert received_prompts[0] == "/nonexistent foo"
 
 
+class TestMultiTurnSkillExecution:
+    """Test that skills producing multi-turn tool-use responses return complete results."""
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_text_fully_returned_non_streaming(self):
+        """Non-streaming response must concatenate text from ALL turns, not just the first."""
+        events = [
+            {"type": "text", "content": "I'll review the package. "},
+            {"type": "tool_use", "name": "Bash", "arguments": '{"command": "npm view xlsx"}'},
+            {"type": "tool_result", "content": "xlsx@0.18.5"},
+            {"type": "text", "content": "## Package Review\n\n| Criteria | Score |\n|---|---|\n| Security | 7/10 |"},
+        ]
+        app = _create_test_app(stream_events=events)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/v1/chat/completions",
+                json={"model": "claude", "messages": [{"role": "user", "content": "review xlsx"}], "stream": False},
+            )
+        assert resp.status_code == 200
+        content = resp.json()["choices"][0]["message"]["content"]
+        # Both text chunks must be in the final content
+        assert "I'll review" in content
+        assert "Package Review" in content
+        assert "Security" in content
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_text_fully_streamed(self):
+        """Streaming response must include text from ALL turns including post-tool text."""
+        events = [
+            {"type": "text", "content": "Analyzing..."},
+            {"type": "tool_use", "name": "WebFetch", "arguments": '{"url": "https://example.com"}'},
+            {"type": "tool_result", "content": "page content"},
+            {"type": "text", "content": "The evaluation shows: PASS"},
+        ]
+        app = _create_test_app(stream_events=events)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/v1/chat/completions",
+                json={"model": "claude", "messages": [{"role": "user", "content": "test"}], "stream": True},
+            )
+        lines = resp.text.strip().split("\n")
+        data_lines = [l for l in lines if l.startswith("data:") and l.strip() != "data: [DONE]"]
+
+        all_content = ""
+        for line in data_lines:
+            data = json.loads(line.split("data:", 1)[1].strip())
+            delta = data.get("choices", [{}])[0].get("delta", {})
+            if "content" in delta:
+                all_content += delta["content"]
+
+        assert "Analyzing" in all_content
+        assert "evaluation shows: PASS" in all_content
+
+    @pytest.mark.asyncio
+    async def test_skill_expanded_prompt_reaches_sdk(self):
+        """Full pipeline: skill expansion → SDK query → complete result returned."""
+        received_prompts = []
+
+        async def _query(session_id, prompt):
+            received_prompts.append(prompt)
+            yield {"type": "text", "content": "Reviewing npm package..."}
+            yield {"type": "tool_use", "name": "Bash", "arguments": '{"command": "npm view xlsx"}'}
+            yield {"type": "tool_result", "content": "xlsx info"}
+            yield {"type": "text", "content": "## Verdict: APPROVED\nScore: 8/10"}
+
+        app = _create_test_app()
+        app.state.session_manager.query = _query
+
+        from src.core.extension_loader import ExtensionLoader
+        from src.core.prompt_expander import PromptExpander
+        import tempfile, os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = os.path.join(tmpdir, ".claude", "skills", "pkg-review")
+            os.makedirs(skill_dir)
+            with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
+                f.write("---\nname: pkg-review\ndescription: Review packages\n---\nEvaluate the package for security and quality.")
+
+            loader = ExtensionLoader(tmpdir, user_dir=os.path.join(tmpdir, "_no_user"))
+            ext_config = loader.scan()
+            expander = PromptExpander(loader)
+
+            app.state.prompt_expander = expander
+            app.state.extension_config = ext_config
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "claude",
+                        "messages": [{"role": "user", "content": "/pkg-review xlsx"}],
+                        "stream": False,
+                    },
+                )
+
+        assert resp.status_code == 200
+        content = resp.json()["choices"][0]["message"]["content"]
+        # Must include both text segments (initial + post-tool)
+        assert "Reviewing npm package" in content
+        assert "Verdict: APPROVED" in content
+        # Prompt must have been expanded with skill body
+        assert len(received_prompts) == 1
+        assert "Evaluate the package" in received_prompts[0]
+        assert "xlsx" in received_prompts[0]
+
+
 class TestToolCalls:
     @pytest.mark.asyncio
     async def test_tool_calls_in_sse_stream(self):

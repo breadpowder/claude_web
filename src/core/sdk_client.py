@@ -10,6 +10,7 @@ from claude_code_sdk import (
     ClaudeCodeOptions,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     query,
@@ -66,6 +67,7 @@ def build_sdk_options(settings, extension_config=None) -> ClaudeCodeOptions:
     opts: dict[str, Any] = {
         "permission_mode": "bypassPermissions",
         "cwd": settings.project_cwd,
+        "max_turns": 30,
     }
 
     if settings.anthropic_model:
@@ -74,12 +76,11 @@ def build_sdk_options(settings, extension_config=None) -> ClaudeCodeOptions:
     # MCP servers from extension config
     if extension_config and extension_config.mcp_servers:
         mcp_servers = {}
-        for server in extension_config.mcp_servers:
-            mcp_servers[server.name] = {
+        for name, server in extension_config.mcp_servers.items():
+            mcp_servers[name] = {
                 "command": server.command,
                 "args": server.args,
                 "env": server.env,
-                "transport": server.transport,
             }
         opts["mcp_servers"] = mcp_servers
 

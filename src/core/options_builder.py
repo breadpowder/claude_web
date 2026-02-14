@@ -17,12 +17,10 @@ class OptionsBuilder:
                 "command": server.command,
                 "args": server.args,
                 "env": server.env,
-                "transport": server.transport,
             }
 
         return {
             "mcp_servers": mcp_servers,
-            "permission_mode": "acceptEdits",
-            "max_turns": 20,
-            "setting_sources": ["user", "project"],
+            "permission_mode": "bypassPermissions",
+            "max_turns": 30,
         }

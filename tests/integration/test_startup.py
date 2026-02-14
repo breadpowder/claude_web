@@ -233,6 +233,66 @@ class TestUserLevelExtensionLoading:
         assert dupe_skills[0]["description"] == "Project version"
 
 
+class TestSDKOptionsConfiguration:
+    """Test that SDK options are correctly built for skill execution."""
+
+    def test_sdk_options_includes_max_turns(self, monkeypatch):
+        """build_sdk_options must set max_turns so multi-turn tool use completes."""
+        from src.core.sdk_client import build_sdk_options
+        from src.core.config import Settings
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        settings = Settings(_env_file=None)
+        opts = build_sdk_options(settings)
+        assert opts.max_turns is not None
+        assert opts.max_turns >= 10  # enough for multi-tool skill execution
+
+    def test_sdk_options_mcp_servers_correctly_built(self, monkeypatch):
+        """MCP server config must be correctly translated to SDK options."""
+        from src.core.sdk_client import build_sdk_options
+        from src.core.config import Settings
+        from src.core.models import ExtensionConfig, MCPServerConfig
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        settings = Settings(_env_file=None)
+
+        ext_config = ExtensionConfig(
+            mcp_servers={
+                "github": MCPServerConfig(
+                    name="github",
+                    command="npx",
+                    args=["-y", "server"],
+                    env={"TOKEN": "abc"},
+                    transport="stdio",
+                )
+            }
+        )
+        opts = build_sdk_options(settings, ext_config)
+        # MCP servers must be a dict with correct structure
+        assert isinstance(opts.mcp_servers, dict)
+        assert "github" in opts.mcp_servers
+        server = opts.mcp_servers["github"]
+        assert server["command"] == "npx"
+        assert server["args"] == ["-y", "server"]
+        assert server["env"] == {"TOKEN": "abc"}
+
+    def test_sdk_options_permission_mode_bypass(self, monkeypatch):
+        """SDK must use bypassPermissions for headless service operation."""
+        from src.core.sdk_client import build_sdk_options
+        from src.core.config import Settings
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        settings = Settings(_env_file=None)
+        opts = build_sdk_options(settings)
+        assert opts.permission_mode == "bypassPermissions"
+
+    def test_npm_available_in_environment(self):
+        """npm must be available in PATH for skills that require it."""
+        import shutil
+        npm_path = shutil.which("npm")
+        assert npm_path is not None, "npm not found in PATH; skills requiring npm will fail"
+
+
 class TestRouterRegistration:
     @pytest.mark.asyncio
     async def test_liveness_probe_always_available(self):

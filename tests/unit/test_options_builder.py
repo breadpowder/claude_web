@@ -24,15 +24,13 @@ class TestOptionsBuilder:
 
         options = OptionsBuilder.build(config)
         assert "github" in options["mcp_servers"]
-        assert options["permission_mode"] == "acceptEdits"
-        assert options["max_turns"] == 20
-        assert "user" in options["setting_sources"]
-        assert "project" in options["setting_sources"]
+        assert options["permission_mode"] == "bypassPermissions"
+        assert options["max_turns"] == 30
 
     def test_options_builder_empty_config(self):
         config = ExtensionConfig()
 
         options = OptionsBuilder.build(config)
         assert options["mcp_servers"] == {}
-        assert options["permission_mode"] == "acceptEdits"
-        assert options["max_turns"] == 20
+        assert options["permission_mode"] == "bypassPermissions"
+        assert options["max_turns"] == 30
