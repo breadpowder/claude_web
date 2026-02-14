@@ -3,11 +3,12 @@ services:
     build: .
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - PROJECT_CWD=/workspace
       - MAX_SESSIONS=10
-      - POOL_SIZE=2
+      - PREWARM_POOL_SIZE=2
       - LOG_LEVEL=INFO
     volumes:
       - ./workspace:/workspace

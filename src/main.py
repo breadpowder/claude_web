@@ -32,6 +32,29 @@ async def _default_client_factory():
     raise NotImplementedError("Real SDK client factory not configured")
 
 
+def _propagate_provider_env(settings: Settings) -> None:
+    """Propagate provider credentials from Settings to os.environ.
+
+    Pydantic-settings reads .env into the Settings object but does NOT set
+    os.environ.  Claude CLI subprocesses inherit os.environ, so we must
+    propagate Bedrock / Anthropic credentials explicitly.
+    """
+    env_map = {
+        "ANTHROPIC_API_KEY": settings.anthropic_api_key,
+        "ANTHROPIC_MODEL": settings.anthropic_model,
+        "CLAUDE_CODE_USE_BEDROCK": settings.claude_code_use_bedrock,
+        "AWS_REGION": settings.aws_region,
+        "AWS_BEARER_TOKEN_BEDROCK": settings.aws_bearer_token_bedrock,
+        "AWS_ACCESS_KEY_ID": settings.aws_access_key_id,
+        "AWS_SECRET_ACCESS_KEY": settings.aws_secret_access_key,
+        "AWS_SESSION_TOKEN": settings.aws_session_token,
+        "AWS_PROFILE": settings.aws_profile,
+    }
+    for key, value in env_map.items():
+        if value:
+            os.environ.setdefault(key, value)
+
+
 def create_app(
     client_factory=None,
     skip_prewarm: bool = False,
@@ -44,6 +67,7 @@ def create_app(
     """
     settings = Settings()
     setup_logging(settings.log_level)
+    _propagate_provider_env(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
