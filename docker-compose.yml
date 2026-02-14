@@ -1,0 +1,18 @@
+services:
+  core-engine:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - PROJECT_CWD=/workspace
+      - MAX_SESSIONS=10
+      - POOL_SIZE=2
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./workspace:/workspace
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
