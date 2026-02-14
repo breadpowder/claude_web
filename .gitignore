@@ -37,3 +37,6 @@ frontend/dist/
 
 # Docker
 docker/*.log
+
+# Task workspace (local context, never commit)
+task_*/
