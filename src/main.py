@@ -20,16 +20,12 @@ from src.core.models import ExtensionConfig
 from src.core.options_builder import OptionsBuilder
 from src.core.prewarm_pool import PreWarmPool
 from src.core.prompt_expander import PromptExpander
+from src.core.sdk_client import create_client_factory
 from src.core.session_index import JSONSessionIndex
 from src.core.session_manager import SessionManager
 from src.core.subprocess_monitor import SubprocessMonitor
 
 logger = get_logger(__name__)
-
-
-async def _default_client_factory():
-    """Default client factory placeholder. Replaced in production with real SDK client creation."""
-    raise NotImplementedError("Real SDK client factory not configured")
 
 
 def _propagate_provider_env(settings: Settings) -> None:
@@ -101,7 +97,7 @@ def create_app(
         app.state.prompt_expander = prompt_expander
 
         # 5. Create pre-warm pool and fill
-        factory = client_factory or _default_client_factory
+        factory = client_factory or create_client_factory(settings, extension_config)
         pool = PreWarmPool(
             target_size=settings.prewarm_pool_size,
             client_factory=factory,

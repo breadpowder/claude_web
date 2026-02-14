@@ -32,13 +32,15 @@ class TestSettingsDefaults:
         assert settings.log_level == "INFO"
         assert settings.project_cwd == "."
 
-    def test_settings_requires_api_key(self, monkeypatch):
+    def test_settings_requires_provider(self, monkeypatch, tmp_path):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_USE_BEDROCK", raising=False)
+        monkeypatch.chdir(tmp_path)  # Avoid reading project .env
 
         from src.core.config import Settings
         with pytest.raises(ValidationError) as exc_info:
-            Settings()
-        assert "anthropic_api_key" in str(exc_info.value).lower()
+            Settings(_env_file=None)
+        assert "anthropic_api_key" in str(exc_info.value).lower() or "bedrock" in str(exc_info.value).lower()
 
     def test_settings_reads_env_overrides(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
