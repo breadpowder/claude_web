@@ -1,287 +1,249 @@
-# Decision Log: core-engine
+# Decision Log: Core Engine MVP
 
-> **Feature**: claude_sdk_pattern Core Engine (Phase 1 MVP)
-> **Date**: 2026-02-07
-
----
-
-## Decision 1: WebSocket vs SSE for Client-Server Communication
-
-**Date**: 2026-02-07
-**Status**: Approved
-
-### Options Considered
-
-| Option | Pros | Cons | Risk Level |
-|--------|------|------|------------|
-| **A: WebSocket** | Bidirectional: native interrupt support (Ctrl+Shift+X sends command over same connection); single connection per session; lower latency for high-frequency streaming | Proxy compatibility issues in some corporate environments; requires sticky sessions at LB; manual reconnection logic | Medium |
-| **B: SSE + REST** | Simpler server implementation; automatic browser reconnection; works through all proxies; no sticky sessions | Interrupt requires separate REST POST; two connections per session (SSE + REST); higher overhead for user-to-server messages | Low |
-
-### Selected Option
-**Option A: WebSocket**
-
-### Rationale
-1. PRD explicitly specifies `/ws/v1/chat` endpoint (FR-002) and interrupt via Ctrl+Shift+X (FR-008, US-005)
-2. Interrupt is a P0 requirement, not a nice-to-have. Separate REST endpoint for interrupt adds race conditions (interrupt must arrive before next streaming token)
-3. Single connection simplifies per-session connection deduplication (G-003: one active connection per session_id)
-4. The target deployment is self-hosted (not corporate proxy environments), reducing proxy risk
-5. SSE fallback is planned for Phase 2 if corporate proxy issues surface (documented in Assumption A-005)
-
-### Strategic Assessment
-- **Current problem solved**: Bidirectional streaming + interrupt in single connection
-- **Edge cases handled**: EC-010 (duplicate tabs), EC-033 (concurrent messages), EC-035 (disconnect mid-tool)
-- **Future ready**: WebSocket token refresh (Phase 2, EC-016), message replay on reconnect (Phase 2, EC-036)
-- **Extensibility**: Can add SSE fallback endpoint later without breaking WebSocket clients
+> **Feature**: core-engine
+> **Date**: 2026-02-14
+> **Authority**: ADR-001 (Platform Strategy), ADR-002 (Technical Architecture)
 
 ---
 
-## Decision 2: Pre-Warming Pool Strategy
+## Decision 1: AG-UI Server Implementation Strategy
 
-**Date**: 2026-02-07
-**Status**: Approved
-
-### Options Considered
-
-| Option | Pros | Cons | Risk Level |
-|--------|------|------|------------|
-| **A: Mandatory pre-warm pool (size >= 1)** | Sub-3s session start; blocks readiness probe until ready; proven UX benefit | ~500MB-1GB per slot baseline cost; complexity (replenishment, invalidation, failure handling) | Medium |
-| **B: No pre-warming (cold start only)** | Zero idle memory cost; simpler code; "Preparing..." UI is acceptable | 20-30s wait for every new session; violates NFR-001 (<3s target); user abandonment risk | High |
-| **C: Lazy pre-warming (warm after first user)** | Lower idle cost than A; first user waits, subsequent users fast | First user always waits 30s; startup probe passes before pool is ready | Medium-High |
-
-### Selected Option
-**Option A: Mandatory pre-warm pool**
-
-### Rationale
-1. PRD specifies pre-warming as P0 (FR-001) with <3s target (NFR-001)
-2. Devil's Advocate challenged this as "premature optimization." PRD response: "The 20-30 second cold start is the primary UX blocker identified in research" (US-001)
-3. Pool blocks readiness probe until at least 1 slot filled (G-002), preventing traffic to unusable instances
-4. Memory cost is acceptable: ~1-2GB for pool=2 on a 16GB server leaves ~14-15GB for active sessions
-5. Edge cases are well-documented: EC-001 (empty pool fallback), EC-014 (rate-limited pre-warm), EC-022 (startup failure)
-
-### Strategic Assessment
-- **Current problem solved**: 20-30s cold start eliminated for normal flow
-- **Edge cases handled**: EC-001, EC-014, EC-022, EC-098
-- **Future ready**: Dynamic pool sizing based on load (Phase 2+)
-- **Anti-pattern avoided**: Over-engineering avoided by starting with configurable static size (PREWARM_POOL_SIZE env var)
-
----
-
-## Decision 3: Session Storage for MVP
-
-**Date**: 2026-02-07
-**Status**: Approved
-
-### Options Considered
-
-| Option | Pros | Cons | Risk Level |
-|--------|------|------|------------|
-| **A: SQLite (aiosqlite)** | Zero deployment overhead; embedded; ACID; validates data model before PostgreSQL | Not suitable for multi-server; file-based locking | Low |
-| **B: PostgreSQL (asyncpg)** | Multi-server ready; rich queries; horizontal read scaling | Requires external service; overkill for single-user MVP; adds deployment complexity | Medium |
-| **C: In-memory dict only** | Simplest; zero persistence | Session metadata lost on restart; no resume support | Low |
-
-### Selected Option
-**Option A: SQLite (aiosqlite)**
-
-### Rationale
-1. PRD specifies "SQLite storage -- no external dependencies" for Phase 1 (Section 3.1)
-2. MVP is single-server, single-user. SQLite handles this trivially.
-3. Data model validated in SQLite migrates cleanly to PostgreSQL in Phase 2 (FR-022)
-4. Session metadata is small (~1KB per session) with infrequent writes
-5. Conversation history is NOT stored in our DB (SDK manages on disk at `~/.claude/`)
-
-### Strategic Assessment
-- **Current problem solved**: Persist session metadata for resume, session list
-- **Future ready**: PostgreSQL migration in Phase 2 with provided migration script
-- **Extensibility**: Abstract DB access behind repository interface for clean swap
-
----
-
-## Decision 4: Extension Loading Mechanism
-
-**Date**: 2026-02-07
-**Status**: Approved
-
-### Options Considered
-
-| Option | Pros | Cons | Risk Level |
-|--------|------|------|------------|
-| **A: Direct pass-through to SDK** | Zero abstraction; matches Claude Code behavior exactly; minimal code | No validation layer; no dynamic management | Low |
-| **B: Custom ExtensionLoader with validation** | Can validate mcp.json schema; can report errors to user; can support hot-detection | More code than A; slight overhead | Low-Medium |
-| **C: Full PluginRegistry (Phase 2 design)** | Formal lifecycle, manifest validation, activation workflow | Massive over-engineering for Phase 1; violates PRD scope | High |
-
-### Selected Option
-**Option B: Custom ExtensionLoader (lightweight)**
-
-### Rationale
-1. PRD specifies "file-based extension model (mcp.json, ./skills/, ./commands/) -- mirrors Claude Code's extension handling" (Section 3.1)
-2. Pure pass-through (A) misses validation: what if mcp.json has invalid JSON? User sees opaque SDK error.
-3. ExtensionLoader adds: (a) validate mcp.json syntax, (b) scan ./skills/ and ./commands/ directories, (c) build ClaudeAgentOptions fields, (d) re-scan on new session creation (FR-011c)
-4. This is NOT the Phase 2 PluginRegistry. No manifest schema, no lifecycle states, no activation workflow.
-5. Guardrail G-003b requires extensions "MUST be loaded using the same mechanism as Claude Code"
-
-### Strategic Assessment
-- **Current problem solved**: Load extensions from filesystem, validate, pass to SDK
-- **Edge cases handled**: Invalid mcp.json (clear error), missing skill files, commands directory
-- **Future ready**: Phase 2 PluginRegistry wraps this and adds formal lifecycle on top
-- **Anti-pattern avoided**: Not building full plugin system for unproven demand (Devil's Advocate Section 2.5)
-
----
-
-## Decision 5: Frontend State Management
-
-**Date**: 2026-02-07
-**Status**: Approved
-
-### Options Considered
-
-| Option | Pros | Cons | Risk Level |
-|--------|------|------|------------|
-| **A: Zustand with slices** | Selective re-renders during streaming; clean separation of message, session, and streaming state; well-tested for high-frequency updates | Extra dependency; learning curve | Low |
-| **B: useReducer + Context** | Zero dependencies; built-in; familiar | Context triggers full subtree re-render; streaming at 10+ tokens/sec causes performance issues | Medium |
-| **C: React 19 useTransition only** | Built-in; handles concurrent updates | Does not solve state subscription problem; still need centralized store for multi-component state | Medium |
-
-### Selected Option
-**Option A: Zustand with slices**
-
-### Rationale
-1. PRD requires streaming token display (FR-003) with <100ms per-token latency (NFR-003)
-2. Multiple components need streaming state simultaneously: MessageList (append tokens), InputBar (disable during stream), ToolUseCard (update status), SessionList (update last-active)
-3. Zustand's selector pattern ensures only the component subscribed to changing state re-renders
-4. Devil's Advocate challenged this. Response: React 19 useTransition helps with batching but does NOT solve the "4 components watching different state slices" problem. Context would force all 4 to re-render on every token.
-5. Zustand is a 1KB library with zero boilerplate. The overhead is minimal.
-
-### Strategic Assessment
-- **Current problem solved**: Efficient state management for streaming UI
-- **Edge cases handled**: EC-028 (high token rate), EC-046 (buffer growth)
-- **Future ready**: Plugin UI slots can create their own Zustand stores (Phase 2)
-- **Anti-pattern avoided**: Over-engineering avoided by using 3 slices max (messages, sessions, streaming)
-
----
-
-## Decision 6: Authentication for MVP
-
-**Date**: 2026-02-07
-**Status**: Approved
-
-### Options Considered
-
-| Option | Pros | Cons | Risk Level |
-|--------|------|------|------------|
-| **A: Single API key** | Simplest; no user management; matches PRD scope | No per-user identity; no audit trail per user | Low |
-| **B: JWT from day 1** | Per-user identity; audit trail; Phase 2 ready | Premature complexity; requires user database; token refresh protocol | Medium |
-
-### Selected Option
-**Option A: Single API key**
-
-### Rationale
-1. PRD explicitly scopes MVP to "API key auth only (no RBAC, no multi-user)" (Section 3.1)
-2. Devil's Advocate confirmed: "API key auth is sufficient for v1" (Section 2.6)
-3. Single operator/user model means per-user identity has no value in Phase 1
-4. API key validated in middleware (REST) and WebSocket upgrade handler
-5. Key stored in CLAUDE_SDK_PATTERN_API_KEY environment variable (never in code or logs, G-009)
-
-### Strategic Assessment
-- **Current problem solved**: Prevent unauthorized access to platform
-- **Future ready**: JWT auth (Phase 2) replaces API key middleware without architectural change
-- **Anti-pattern avoided**: Not building RBAC for users that do not exist yet
-
----
-
-## Decision 7: Container Strategy for MVP
-
-**Date**: 2026-02-07
-**Status**: Approved
-
-### Options Considered
-
-| Option | Pros | Cons | Risk Level |
-|--------|------|------|------------|
-| **A: Single container (backend + frontend)** | Simple deployment (`docker run`); matches FR-012 | All sessions share container resources; no session isolation | Low |
-| **B: Container-per-session** | Full session isolation; memory limits per session; clean zombie cleanup | Complex orchestration; requires Kubernetes or similar | High |
-
-### Selected Option
-**Option A: Single container for MVP**
-
-### Rationale
-1. PRD specifies "Single Dockerfile builds complete platform" (FR-012)
-2. Phase 1 targets up to 10 concurrent sessions on a single 16GB host (NFR-008, updated with corrected ~500MB-1GB baseline per subprocess)
-3. Container-per-session requires orchestration that exceeds MVP scope
-4. SubprocessMonitor handles memory and zombie concerns within the single container
-5. Container-per-session is a Phase 3 optimization for isolation and horizontal scaling, not required for memory management at MVP scale
-
-### Strategic Assessment
-- **Current problem solved**: Simple `docker run` deployment
-- **Future ready**: Architecture supports extraction to container-per-session without redesign
-- **Risk mitigation**: RSS monitoring (2GB threshold) + 4h duration cap; 16GB host handles 10 sessions comfortably
-
----
-
-## Decision 8: 10 Concurrent Sessions on Single Host for MVP
-
-**Date**: 2026-02-07
+**Date**: 2026-02-14
 **Status**: Approved
 
 ### Context
 
-Previous capacity estimates were based on a ~2.5GB per subprocess baseline, which limited the platform to 2-3 concurrent sessions on a 16GB server. Corrected evidence from GitHub #4953 (OPEN) shows the actual baseline is ~500MB-1GB per subprocess. This fundamentally changes the capacity math and the container-per-session recommendation for MVP.
+ADR-002 Decision 3 mandates AG-UI protocol for frontend communication. The AG-UI Python server SDK exists (`ag-ui-protocol` package with `ag_ui.core` for event types and `ag_ui.encoder` for SSE encoding). The question is whether to use the SDK or implement the event stream directly on FastAPI.
 
 ### Options Considered
 
 | Option | Pros | Cons | Risk Level |
 |--------|------|------|------------|
-| **A: Single-host, 10 concurrent sessions** | Simple deployment; no orchestration; 10 x ~750MB = ~7.5GB fits in 16GB with headroom; matches MVP simplicity | No session isolation; shared memory space; requires RSS monitoring per session | Low-Medium |
-| **B: Container-per-session (K8s orchestration)** | Full isolation; clean zombie cleanup; independent memory limits per session | Requires Kubernetes or Docker Swarm; massive deployment complexity for MVP; overkill at 10-session scale | High |
-| **C: Hybrid (single-host MVP, container-per-session Phase 3)** | MVP simplicity now; production isolation later; incremental path | Must design SubprocessMonitor to work in both models | Low |
+| A: Use ag-ui-protocol Python SDK | Standard event types and encoder; less custom code; protocol-compliant event names | Additional dependency; SDK maturity unknown; may not cover custom events | Medium |
+| B: Implement AG-UI events directly on FastAPI | Full control; no dependency risk; can add custom events freely; thin protocol (JSON over SSE) | Must maintain event type definitions ourselves; risk of protocol drift | Low |
+| C: Hybrid -- use ag_ui.core for types, custom SSE encoder | Standard types from SDK; custom streaming logic for FastAPI integration; best of both | Two codebases to maintain (types from SDK, streaming from us) | Low |
 
 ### Selected Option
-**Option C: Hybrid (single-host MVP, container-per-session Phase 3)**
+
+**Option C: Hybrid approach**
 
 ### Rationale
 
-**Memory Budget Calculation (10 concurrent sessions)**:
+- AG-UI event types (`RunStartedEvent`, `TextMessageContentEvent`, `ToolCallStartEvent`, etc.) from `ag_ui.core` ensure protocol compliance
+- The `EventEncoder` from `ag_ui.encoder` handles SSE formatting correctly
+- Custom events for platform-specific notifications (session_warning, session_terminated, session_restarting) are supported by AG-UI's custom event mechanism
+- ADR-002 Decision 3 trade-off explicitly states: "Event stream can be implemented directly on FastAPI; protocol is lightweight JSON events over HTTP"
+- FastAPI's `StreamingResponse` with async generators is the natural fit
 
-| Component | Memory | Calculation |
-|-----------|--------|-------------|
-| 10 sessions baseline | ~7.5GB | 10 x ~750MB (midpoint of 500MB-1GB range) |
-| 10 sessions with leak headroom | ~15GB | 10 x ~1.5GB (conservative 2x buffer for memory growth over session lifetime) |
-| OS + FastAPI + React build serving | ~1-2GB | Platform overhead |
-| **Minimum server RAM** | **16GB (tight)** | 7.5GB baseline + 1.5GB overhead + headroom |
-| **Comfortable server RAM** | **32GB** | Full leak headroom + overhead |
+### Edge Case Implications
 
-**Key observations**:
-1. With corrected ~500MB-1GB baseline (not 2.5GB), 10 sessions fit comfortably on a 16GB host
-2. The RSS restart threshold of 2GB (~3x baseline) catches leaking sessions early, before they consume excessive memory
-3. 4-hour session duration cap (mitigating GitHub #4953 unbounded growth) further limits per-session memory growth
-4. Pre-warm pool of 2-3 is reasonable: covers burst creation at 20-30s cold start per slot
-5. Container-per-session adds isolation benefits (zombie cleanup, crash isolation) but is not required for memory management at this scale
-
-**Alternatives rejected**:
-- Container-per-session for MVP: overkill at 10-session scale. The orchestration complexity (K8s/Docker Swarm, service discovery, session routing) far exceeds the isolation benefit when SubprocessMonitor + RSS monitoring + duration caps provide adequate safeguards.
-
-**RSS threshold update**:
-- Previous: MAX_SESSION_RSS_MB=4096 (4GB) -- based on incorrect 2.5GB baseline assumption
-- Updated: MAX_SESSION_RSS_MB=2048 (2GB) -- ~3x the corrected ~750MB baseline. This catches sessions that have grown 3x their baseline, indicating a leak, while leaving headroom before the session becomes a memory problem for co-located sessions.
+| Edge Case | How This Handles It |
+|-----------|-------------------|
+| EC-NEW-002: Stream interrupted | HTTP-based; client re-establishes connection and retries |
+| EC-NEW-003: Large tool result | Truncate in AG-UI event; full result via REST fallback |
+| EC-NEW-004: Concurrent runs | Backend rejects with AG-UI error event (one run per session) |
+| EC-NEW-005: Cancel race condition | Idempotent cancel; completed runs ignored |
+| EC-NEW-006: Custom events | AG-UI supports custom event types by design |
 
 ### Strategic Assessment
-- **Current problem solved**: 10 concurrent sessions on MVP single host with adequate monitoring
-- **Edge cases handled**: Memory leaks caught at 2GB via RSS monitoring; 4h duration cap prevents unbounded growth
-- **Future ready**: Container-per-session in Phase 3 adds isolation for multi-tenant, horizontal scaling
-- **Anti-pattern avoided**: Not over-engineering MVP with K8s orchestration for 10 sessions
+
+- **Solves current problem**: YES -- AG-UI event streaming to frontend
+- **Handles edge cases**: YES -- all 5 AG-UI edge cases covered
+- **Supports future growth**: YES -- custom events extensible for Phase 2+ features
+- **Extensibility score**: 9/10
+
+---
+
+## Decision 2: OpenAI-Compliant API Translation Layer
+
+**Date**: 2026-02-14
+**Status**: Approved
+
+### Context
+
+ADR-002 Decision 3 mandates an OpenAI-compliant streaming API for server-to-server agentic calls. The platform must translate between Claude SDK stream events and OpenAI SSE format (`choices[].delta.content`, `tool_calls`, `finish_reason`, `usage`).
+
+### Options Considered
+
+| Option | Pros | Cons | Risk Level |
+|--------|------|------|------------|
+| A: Custom translation layer on FastAPI | Full control; no dependency; matches exact OpenAI format | Must maintain format compliance manually; risk of format drift | Low |
+| B: Use sse-starlette library for SSE transport | Battle-tested SSE implementation; handles connection management | Only provides transport, not format translation | Low |
+| C: Reference claude-code-openai-wrapper patterns | Proven message_adapter.py and SSE patterns; same SDK | No license (cannot use code); patterns only as reference | Low |
+
+### Selected Option
+
+**Option A + B: Custom translation with sse-starlette transport**
+
+### Rationale
+
+- sse-starlette (MIT) provides reliable SSE transport on FastAPI
+- Custom adapter translates SDK events to OpenAI format (message_adapter pattern from wrapper reference)
+- OpenAI format is stable and well-documented (A-008 confirmed)
+- Unsupported parameters silently ignored for maximum compatibility (EC-NEW-008)
+
+### Edge Case Implications
+
+| Edge Case | How This Handles It |
+|-----------|-------------------|
+| EC-NEW-007: No session available | 503 with Retry-After header, OpenAI error format |
+| EC-NEW-008: Unsupported parameters | Ignore silently, log warning |
+| EC-NEW-009: Session terminated mid-stream | SSE error event + [DONE] sentinel |
+
+### Strategic Assessment
+
+- **Solves current problem**: YES -- any OpenAI-compatible client can call the platform
+- **Handles edge cases**: YES -- all 3 OpenAI API edge cases covered
+- **Supports future growth**: YES -- version endpoint for format evolution
+- **Extensibility score**: 8/10
+
+---
+
+## Decision 3: Session State Management Architecture
+
+**Date**: 2026-02-14
+**Status**: Approved
+
+### Context
+
+The platform must manage multiple concurrent SDK sessions (up to 10), each backed by a CLI subprocess. Session metadata must persist in JSON files (ADR-002 Decision 5). The pre-warming pool must use asyncio.Queue (ADR-002 Decision 4).
+
+### Options Considered
+
+| Option | Pros | Cons | Risk Level |
+|--------|------|------|------------|
+| A: Single SessionManager class with internal state | Simple; one place for all session logic; easy to test | Large class; mixing concerns (pool, monitoring, index, lifecycle) | Medium |
+| B: Decomposed into SessionManager + PreWarmPool + SubprocessMonitor + JSONSessionIndex | Clean separation of concerns; each component independently testable; matches spec entities | More files; inter-component coordination required | Low |
+| C: Actor model (one actor per session) | True isolation; natural for subprocess model | Complex; Python asyncio actors are not standard; overkill for 10 sessions | High |
+
+### Selected Option
+
+**Option B: Decomposed architecture**
+
+### Rationale
+
+- SessionManager orchestrates, delegates to specialized components
+- PreWarmPool manages asyncio.Queue of pre-initialized ClaudeSDKClient instances
+- SubprocessMonitor handles RSS tracking, duration limits, zombie cleanup (matches US-004 control flow entities)
+- JSONSessionIndex handles atomic file I/O with locking (matches Decision 5)
+- Each component maps cleanly to spec entities and edge cases
+- Testing is straightforward: mock dependencies, test each component independently
+
+### Edge Case Implications
+
+| Edge Case | Component | How Handled |
+|-----------|-----------|-------------|
+| EC-001: Pool empty | PreWarmPool | Returns None; SessionManager falls back to cold start |
+| EC-003: Duration limit mid-query | SubprocessMonitor | 30s grace period; interrupt if exceeded |
+| EC-004: RSS exceeds threshold | SubprocessMonitor | Flag for graceful restart after query completes |
+| EC-007: Corrupted resume data | SessionManager | try/except on resume; fall back to fresh session |
+| EC-NEW-001: First startup | JSONSessionIndex | Create directory and initial empty JSON file |
+| EC-NEW-010: Concurrent writes | JSONSessionIndex | File locking via filelock library |
+| EC-NEW-011: Corrupted index | JSONSessionIndex | Recover from .bak file or re-create empty |
+
+### Strategic Assessment
+
+- **Solves current problem**: YES -- manages 10 concurrent sessions with monitoring
+- **Handles edge cases**: YES -- all 10 session lifecycle edge cases covered
+- **Supports future growth**: YES -- components replaceable (e.g., JSONSessionIndex -> SQLite in Phase 2)
+- **Extensibility score**: 9/10
+
+---
+
+## Decision 4: Frontend Architecture (React + Zustand + AG-UI Client)
+
+**Date**: 2026-02-14
+**Status**: Approved
+
+### Context
+
+ADR-002 Decision 7 mandates Zustand with slice pattern. Decision 3 mandates AG-UI protocol for frontend communication. Phase 1 renders full messages (not token-by-token streaming).
+
+### Options Considered
+
+| Option | Pros | Cons | Risk Level |
+|--------|------|------|------------|
+| A: Custom AG-UI client + Zustand stores | Full control; no framework lock-in; matches our exact event handling needs | Must implement SSE parsing and event dispatch | Low |
+| B: Use @ag-ui/client library + Zustand | Standard client; handles SSE parsing; typed events | Additional dependency; may not integrate cleanly with Zustand | Medium |
+| C: Use CopilotKit (AG-UI reference implementation) | Full AG-UI frontend; React hooks for events | Heavy dependency; opinionated UI; may conflict with our custom components | High |
+
+### Selected Option
+
+**Option A: Custom AG-UI client + Zustand stores**
+
+### Rationale
+
+- AG-UI is lightweight JSON over SSE; parsing is trivial (EventSource API or fetch + ReadableStream)
+- Zustand stores map naturally to AG-UI event categories: chatStore (messages), sessionStore (lifecycle), toolStore (tool calls)
+- Custom components (MessageList, InputBar, ToolUseCard) required anyway per FR-008
+- Full message rendering (not streaming) simplifies state management -- buffer events, render on text_message_end
+- Phase 2 can adopt @ag-ui/client if needed without architectural changes
+
+### Strategic Assessment
+
+- **Solves current problem**: YES -- React UI with AG-UI event handling
+- **Handles edge cases**: YES -- custom event handling for platform-specific events
+- **Supports future growth**: PARTIAL -- may need to add token streaming in Phase 1.1 if A-010 is invalidated
+- **Extensibility score**: 8/10
+
+---
+
+## Decision 5: Extension Discovery Strategy
+
+**Date**: 2026-02-14
+**Status**: Approved
+
+### Context
+
+ADR-002 Decision 6 mandates a lightweight ExtensionLoader that scans the filesystem for mcp.json, ./skills/, and ./commands/. No plugin runtime, no lifecycle management.
+
+### Options Considered
+
+| Option | Pros | Cons | Risk Level |
+|--------|------|------|------------|
+| A: Scan once on startup only | Simplest; no file watching; predictable | Changes require full restart | Low |
+| B: Scan on startup + re-scan on new session creation (hot-detection) | Changes picked up by new sessions; no restart for new extensions; matches FR-011c | Slightly more I/O per session creation; filesystem read on each session | Low |
+| C: Filesystem watcher (watchdog) | Real-time detection; no restart needed | Complex; race conditions; Phase 2 feature per ADR-002 Decision 6 trade-off | Medium |
+
+### Selected Option
+
+**Option B: Scan on startup + re-scan on new session creation**
+
+### Rationale
+
+- FR-011c specifies "re-scanned when new session created" for hot-detection
+- ADR-002 Decision 6 defers filesystem watching to Phase 2
+- Filesystem reads are cheap (< 1ms for directory listing + JSON parse)
+- Active sessions are unaffected by filesystem changes (already loaded)
+- New sessions get current state of extensions
+
+### Edge Case Implications
+
+| Edge Case | How Handled |
+|-----------|-------------|
+| EC-NEW-013: mcp.json deleted while running | New sessions start without MCP; active sessions unaffected |
+| EC-NEW-014: MCP server binary not found | SDK reports error; session starts but that server unavailable |
+| EC-NEW-015: Malformed SKILL.md | SDK ignores; logged with file path |
+| EC-116: Env var injection | Sanitize; blocklist dangerous vars |
+
+### Strategic Assessment
+
+- **Solves current problem**: YES -- extensions discovered and passed to SDK
+- **Handles edge cases**: YES -- all 5 extension edge cases covered
+- **Supports future growth**: YES -- can add filesystem watcher in Phase 2 without changing interface
+- **Extensibility score**: 8/10
 
 ---
 
 ## Decision Traceability Matrix
 
-| Tech Decision | User Stories Affected | Edge Cases Handled | Future Scenarios |
-|--------------|----------------------|-------------------|------------------|
-| WebSocket | US-002, US-003, US-005 | EC-010, EC-033, EC-035 | SSE fallback, token refresh |
-| Pre-warm pool | US-001 | EC-001, EC-014, EC-022, EC-098 | Dynamic sizing, auto-scale |
-| SQLite | US-006 (resume metadata) | EC-007, EC-073 | PostgreSQL migration |
-| ExtensionLoader | US-002 (tool use), FR-011/011a/011b/011c | Invalid mcp.json, missing skills | PluginRegistry wraps this |
-| Zustand | US-002, US-003, US-005 | EC-028, EC-046 | Plugin UI stores |
-| API key auth | US-002, FR-009 | WebSocket auth failure | JWT replacement |
-| Single container | FR-012 | EC-114, EC-121 | Container-per-session |
-| 10 sessions on single host | FR-010, NFR-008 | Memory leaks (RSS monitoring), duration limits | Container-per-session (Phase 3) |
+| Tech Decision | User Stories Affected | Edge Cases Handled | ADR Decisions |
+|--------------|----------------------|-------------------|---------------|
+| AG-UI hybrid (D1) | US-002, US-003, US-005, US-007, US-011 | EC-NEW-002 to EC-NEW-006 | D3 |
+| OpenAI API translation (D2) | US-008 | EC-NEW-007 to EC-NEW-009 | D3 |
+| Session decomposition (D3) | US-001, US-004, US-006, US-009 | EC-001, EC-003, EC-004, EC-007, EC-NEW-001, EC-NEW-010 to EC-NEW-012 | D4, D5, D10 |
+| Frontend architecture (D4) | US-002, US-003, US-005 | EC-NEW-004, EC-NEW-005 | D3, D7 |
+| Extension discovery (D5) | US-010 | EC-NEW-013 to EC-NEW-015, EC-116 | D6 |
 
 ---
 

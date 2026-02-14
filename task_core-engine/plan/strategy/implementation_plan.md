@@ -1,270 +1,212 @@
-# Implementation Plan: core-engine (Phase 1 MVP)
+# Implementation Plan: Core Engine MVP
 
-> **Feature**: claude_sdk_pattern Core Engine
-> **Date**: 2026-02-07
-> **Phase**: 1 (Weeks 1-4)
-> **Reference**: architecture.md, decision-log.md
+> **Feature**: core-engine
+> **Date**: 2026-02-14
+> **Authority**: ADR-001 (Platform Strategy), ADR-002 (Technical Architecture)
+> **Primary Output**: Integration contracts for downstream implementation
 
 ---
 
 ## 1. Problem Statement Summary
 
-**Goal**: Build a web platform that wraps the Claude Agent SDK, enabling a single user to chat with Claude agents through a browser with multiple concurrent sessions, file-based extensions (mcp.json, skills, commands), and acceptable startup latency (<3s via pre-warming pool).
+### Goal
 
-**Success Criteria**:
-- User can chat via web browser with <3s response time (pre-warmed)
-- User can create, switch between, and manage multiple independent sessions
-- Agent uses MCP servers from mcp.json, skills from ./skills/, commands from ./commands/
-- Up to 10 concurrent sessions on a single 16GB host without OOM
-- Session runs for 2+ hours without OOM crash
-- `docker run` starts a working instance within 90 seconds
+Build the production operations layer for Claude Agent SDK: a Python/FastAPI backend that wraps SDK CLI subprocesses, exposes AG-UI protocol for frontends, OpenAI-compliant streaming API for server-to-server agentic calls, and REST API for data operations. Deploy as a single Docker container on 16GB host supporting 10 concurrent sessions with sub-3-second session start via pre-warming pool.
+
+### Success Criteria
+
+| Criteria | Target | Measurement |
+|----------|--------|-------------|
+| Time to first response (pre-warmed) | < 3 seconds | Session assignment + first AG-UI text event |
+| Time to first response (cold start) | < 35 seconds | Subprocess init + first AG-UI text event |
+| Concurrent sessions | Up to 10 on 16GB host | Load test with memory monitoring |
+| Session crash rate | < 0.1% | Crashed / total per day |
+| AG-UI event delivery latency | < 200ms | SDK event to AG-UI event delivery |
+| OpenAI API first chunk latency | < 3 seconds (pre-warmed) | Request to first SSE chunk |
+| Docker startup to first chat | < 90 seconds | Startup probe pass time |
 
 ---
 
 ## 2. Reference Documents
 
-| Document | Location | Purpose |
-|----------|----------|---------|
-| Architecture | `task_core-engine/plan/strategy/architecture.md` | Component diagrams, data flows |
-| Decision Log | `task_core-engine/plan/decision-log.md` | Technology choices with rationale |
-| Feature Spec | `task_core-engine/specs/feature-spec.md` | Requirements, NFRs, guardrails |
-| User Stories | `task_core-engine/specs/user-stories.md` | Acceptance criteria (Given/When/Then) |
-| Edge Cases | `task_core-engine/specs/edge-case-resolutions.md` | HIGH risk edge case resolutions |
-| Control Flows | `task_core-engine/specs/control-flows/` | Step-by-step user journeys |
-| Tech Feasibility | `task_core-engine/requirement/team_findings/technical_feasibility.md` | SDK APIs, known limitations |
+| Document | Path | Purpose |
+|----------|------|---------|
+| Architecture | `task_core-engine/plan/strategy/architecture.md` | Component diagrams, data flow, error handling matrix |
+| Decision Log | `task_core-engine/plan/decision-log.md` | Technology decisions with rationale |
+| Feature Spec | `task_core-engine/specs/feature-spec.md` | Requirements, constraints, guardrails |
+| User Stories | `task_core-engine/specs/user-stories.md` | Acceptance criteria |
+| Edge Cases | `task_core-engine/specs/edge-case-resolutions.md` | Design decisions for 36 HIGH risk cases |
+| Control Flows | `task_core-engine/specs/control-flows/*.md` | Step-by-step flows for US-001, US-002, US-004, US-008 |
+| ADR-001 | `docs/adr/ADR-001-platform-strategy.md` | Platform and language decisions |
+| ADR-002 | `docs/adr/ADR-002-technical-architecture.md` | Technical architecture decisions D3-D10 |
 
 ---
 
 ## 3. Feature Planning Details
 
-### 3.1 Configuration and Models (Layer 0)
+### 3.1 Backend Core Components
 
-**What to build**: Environment variable configuration, Pydantic data models for sessions, WebSocket messages, and extension configs. SQLite schema.
+#### SessionManager
 
-**Files to create**:
-- `src/claude_sdk_pattern/config.py`
-- `src/claude_sdk_pattern/models/session.py`
-- `src/claude_sdk_pattern/models/messages.py`
-- `src/claude_sdk_pattern/models/extensions.py`
-- `src/claude_sdk_pattern/db/migrations.py`
+- **File**: `src/core/session_manager.py`
+- **Responsibility**: Orchestrate session lifecycle (create, query, interrupt, destroy, resume)
+- **Dependencies**: PreWarmPool, SubprocessMonitor, JSONSessionIndex, ExtensionLoader
+- **Key behaviors**:
+  - `create_session()` attempts pool assignment first, cold start fallback
+  - `query(session_id, prompt)` delegates to ClaudeSDKClient.query(), yields SDK stream events
+  - `interrupt(session_id)` calls client.interrupt()
+  - `destroy_session(session_id)` cleans up subprocess, updates index
+  - `resume_session(session_id)` creates new client with `resume=session_id` parameter
+  - Enforces one active run per session_id (G-003)
+  - Enforces max 10 concurrent sessions (Decision 10)
+- **User Stories**: US-001, US-002, US-004, US-006, US-009
 
-**Configuration variables** (all from environment):
+#### PreWarmPool
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| CLAUDE_SDK_PATTERN_API_KEY | str | required | API key for auth |
-| ANTHROPIC_API_KEY | str | required | Claude API key |
-| PREWARM_POOL_SIZE | int | 2 | Pre-warm pool target depth |
-| MAX_SESSIONS | int | 10 | Max concurrent sessions (10 feasible on 16GB host at ~750MB baseline per session) |
-| MAX_SESSION_DURATION_SECONDS | int | 14400 | 4 hours |
-| MAX_SESSION_RSS_MB | int | 2048 | 2 GB (~3x the ~750MB baseline; corrected from previous 4GB based on actual ~500MB-1GB baseline per GitHub #4953) |
-| SESSION_IDLE_TIMEOUT_SECONDS | int | 1800 | 30 minutes |
-| PREWARM_TIMEOUT_SECONDS | int | 60 | Max wait per pre-warm |
-| DATABASE_URL | str | sqlite:///data/sessions.db | SQLite path |
-| HOST | str | 0.0.0.0 | Bind address |
-| PORT | int | 8000 | Bind port |
-| LOG_LEVEL | str | INFO | structlog level |
-| PROJECT_DIR | str | . | Root for mcp.json, skills/, commands/ |
+- **File**: `src/core/prewarm_pool.py`
+- **Responsibility**: Maintain pool of pre-initialized ClaudeSDKClient instances in asyncio.Queue
+- **Key behaviors**:
+  - `fill(size)` initializes N clients on startup; blocks readiness probe until at least 1 succeeds (G-002)
+  - `get()` returns pre-warmed client or None (non-blocking)
+  - `replenish()` background task to fill empty slots; 5-min backoff on rate limit (EC-014)
+  - Pool size configurable via `PREWARM_POOL_SIZE` env var (default 2)
+  - Pool slots count toward 10-session max
+- **User Stories**: US-001
 
-**Dependencies on**: None (foundation layer)
+#### SubprocessMonitor
 
-### 3.2 Session Repository (Layer 1)
+- **File**: `src/core/subprocess_monitor.py`
+- **Responsibility**: Monitor session subprocess health; enforce limits; cleanup
+- **Key behaviors**:
+  - `check_rss()` reads `/proc/<pid>/status` VmRSS every 30s; threshold 2GB (configurable)
+  - `check_duration()` compares elapsed vs max every 60s; warning at 90%, terminate at 100%
+  - `cleanup_zombies()` scans child processes every 60s; kills orphans; reaps zombies
+  - `check_disk()` monitors ~/.claude/ disk usage every 300s; cleanup at 80%, restart at 100%
+  - Graceful restart: wait for in-flight query (up to 30s), then SIGTERM, wait 5s, SIGKILL
+  - Emits AG-UI custom events for session_warning, session_restarting, session_terminated
+- **User Stories**: US-004
 
-**What to build**: aiosqlite-based repository for session metadata persistence.
+#### JSONSessionIndex
 
-**File to create**: `src/claude_sdk_pattern/db/repository.py`
+- **File**: `src/core/session_index.py`
+- **Responsibility**: Persist session metadata as JSON files with atomic I/O
+- **Key behaviors**:
+  - `init()` creates directory and empty index on first startup (EC-NEW-001)
+  - `read(session_id)` returns session metadata
+  - `write(session_id, metadata)` atomic write: temp file + rename with file lock
+  - `list()` returns all sessions sorted by last_active_at
+  - `cleanup_old(days=30)` removes entries for terminated sessions older than threshold
+  - Recovery: on corrupted JSON, attempts .bak file recovery, else re-creates empty (EC-NEW-011)
+- **User Stories**: US-006, US-009
 
-**Interface**:
-- `SessionRepository.__init__(db_path: str) -> None`
-- `SessionRepository.initialize() -> None`: Create tables if not exist
-- `SessionRepository.save(metadata: SessionMetadata) -> None`
-- `SessionRepository.get(session_id: str) -> Optional[SessionMetadata]`
-- `SessionRepository.list_active() -> list[SessionMetadata]`
-- `SessionRepository.update_activity(session_id: str, message_count: int, cost: float) -> None`
-- `SessionRepository.mark_terminated(session_id: str, reason: str) -> None`
+#### ExtensionLoader
 
-**Dependencies on**: models/session, db/migrations, config
+- **File**: `src/core/extension_loader.py`
+- **Responsibility**: Scan filesystem for mcp.json, skills, commands; pass config to SDK
+- **Key behaviors**:
+  - `scan()` reads mcp.json, scans ./skills/, scans ./commands/ (called on startup + each new session)
+  - Returns config suitable for ClaudeAgentOptions (mcp_servers, setting_sources)
+  - Sanitizes extension env vars (blocklist: LD_PRELOAD, LD_LIBRARY_PATH, PATH, PYTHONPATH, NODE_PATH)
+  - Logs parse errors gracefully; session starts without failed extensions
+- **User Stories**: US-010
 
-### 3.3 Extension Loader (Layer 1)
+#### OptionsBuilder
 
-**What to build**: Filesystem scanner for mcp.json, skills directories, and commands. Builds ClaudeAgentOptions-compatible config.
+- **File**: `src/core/options_builder.py`
+- **Responsibility**: Build ClaudeAgentOptions from extensions + platform defaults + session overrides
+- **Key behaviors**:
+  - Merges mcp_servers from ExtensionLoader
+  - Sets setting_sources for skill discovery
+  - Applies platform defaults: permission_mode="acceptEdits", max_turns=20
+  - Applies session overrides: resume, model selection
+  - For OpenAI API sessions: adapts allowed_tools based on request.tools
 
-**File to create**: `src/claude_sdk_pattern/core/extension_loader.py`
+### 3.2 API Layer
 
-**Interface**:
-- `ExtensionLoader.__init__(project_dir: str) -> None`
-- `ExtensionLoader.load_options() -> ExtensionConfig`: Re-scan all sources, return config
-- `ExtensionLoader.get_mcp_servers() -> dict`: Parse mcp.json
-- `ExtensionLoader.get_skill_directories() -> list[str]`: List discovered skill dirs
-- `ExtensionLoader.get_commands() -> list[CommandDef]`: List discovered commands
+#### AG-UI Endpoint
 
-**Behavior**:
-- `load_options()` re-reads from disk on every call (hot-detection per FR-011c)
-- Invalid mcp.json: log error, return empty mcp_servers (do not crash)
-- Missing ./skills/ or ./commands/: silently skip (directories are optional)
-- mcp.json format matches Claude Code: `{"mcpServers": {"name": {"command": "...", "args": [...], "env": {...}}}}`
+- **File**: `src/api/agui_endpoint.py`
+- **Responsibility**: Handle AG-UI protocol interactions between frontend and agent
+- **Key behaviors**:
+  - Receives RunAgentInput (thread_id, run_id, messages, tools, context, state)
+  - Translates SDK stream events to AG-UI events via ag_ui.encoder.EventEncoder
+  - Supports run actions: start, cancel, resume (human-in-the-loop)
+  - Emits custom events for platform notifications (session_warning, session_terminated)
+  - Returns StreamingResponse with SSE content type
 
-**Dependencies on**: models/extensions, config
+#### OpenAI-Compliant API Endpoint
 
-### 3.4 Pre-Warm Pool (Layer 2)
+- **File**: `src/api/openai_endpoint.py`
+- **Responsibility**: Provide OpenAI-compatible chat completions endpoint for server-to-server
+- **Key behaviors**:
+  - Parses OpenAI request format (model, messages, stream, tools, max_tokens)
+  - Ignores unsupported parameters silently (EC-NEW-008)
+  - Streaming mode: SSE with choices[].delta.content chunks + [DONE] sentinel
+  - Non-streaming mode: single JSON response with choices[].message.content
+  - Manages short-lived sessions (acquire from pool, release after response)
 
-**What to build**: asyncio.Queue-based pool of ready ClaudeSDKClient instances with background replenishment.
+#### OpenAI Adapter
 
-**File to create**: `src/claude_sdk_pattern/core/prewarm_pool.py`
+- **File**: `src/api/openai_adapter.py`
+- **Responsibility**: Translate between OpenAI message format and SDK prompt format; translate SDK events to OpenAI SSE chunks
+- **Key behaviors**:
+  - `messages_to_prompt(messages)` converts OpenAI messages array to SDK prompt string
+  - `sdk_event_to_chunk(event)` translates SDK stream events to OpenAI delta format
+  - `format_error(status, message)` produces OpenAI-format error responses
+  - `format_usage(result)` extracts token usage from ResultMessage
 
-**Interface**:
-- `PreWarmPool.__init__(pool_size: int, extension_loader: ExtensionLoader) -> None`
-- `PreWarmPool.startup_fill() -> bool`: Block until at least 1 slot filled; return False if all fail
-- `PreWarmPool.get() -> Optional[ClaudeSDKClient]`: Non-blocking get from queue
-- `PreWarmPool.replenish() -> None`: Background task to fill pool to target
-- `PreWarmPool.invalidate() -> None`: Drain pool (extensions changed)
-- `PreWarmPool.depth() -> int`: Current pool size
-- `PreWarmPool.shutdown() -> None`: Drain and cleanup all clients
+#### REST API Endpoints
 
-**Pre-warm process**:
-1. Call ExtensionLoader.load_options() to get current config
-2. Create ClaudeSDKClient with options
-3. Enter async context manager (starts subprocess)
-4. Place client in queue
-5. If creation fails (rate limit, API error): log, backoff, retry
+- **File**: `src/api/rest_endpoints.py`
+- **Responsibility**: Standard REST for session CRUD, health, extensions
+- **Key behaviors**:
+  - All endpoints documented in Section 4.1
+  - No authentication required (Decision 8)
+  - JSON responses with consistent error format
 
-**Dependencies on**: extension_loader, config
+### 3.3 Frontend Components
 
-### 3.5 Subprocess Monitor (Layer 2)
+#### Zustand Stores
 
-**What to build**: Background monitoring for RSS memory, session duration, and zombie process cleanup.
+- **File**: `frontend/src/stores/`
+  - `chatStore.ts` -- messages per session, optimistic UI
+  - `sessionStore.ts` -- active session, session list, lifecycle state
+  - `toolStore.ts` -- tool call state, approval dialogs
+  - `uiStore.ts` -- loading state, error state, input focus
 
-**File to create**: `src/claude_sdk_pattern/core/subprocess_monitor.py`
+#### AG-UI Client
 
-**Interface**:
-- `SubprocessMonitor.__init__(config: Config) -> None`
-- `SubprocessMonitor.start(session_manager: SessionManager) -> None`: Launch background tasks
-- `SubprocessMonitor.stop() -> None`: Cancel background tasks
-- `SubprocessMonitor.get_rss(pid: int) -> Optional[int]`: RSS in bytes from /proc or ps
-- `SubprocessMonitor.check_all() -> list[MonitorAction]`: Check all sessions, return actions
+- **File**: `frontend/src/lib/agui-client.ts`
+- **Responsibility**: Connect to AG-UI endpoint, parse SSE events, dispatch to Zustand stores
+- **Key behaviors**:
+  - Uses fetch + ReadableStream (or EventSource) for SSE consumption
+  - Dispatches events to appropriate Zustand store by event type
+  - Handles custom events (session_warning, session_terminated)
+  - Manages run lifecycle (start, cancel, resume)
 
-**Monitor actions** returned from check_all():
-- `MonitorAction(type="warn_duration", session_id, remaining_seconds)`
-- `MonitorAction(type="terminate_duration", session_id)`
-- `MonitorAction(type="restart_memory", session_id, rss_mb)`
-- `MonitorAction(type="force_kill_memory", session_id, rss_mb)` (RSS > 2x threshold)
-- `MonitorAction(type="cleanup_zombie", pid)`
+#### React Components
 
-**Platform compatibility**:
-- Linux: read `/proc/<pid>/status` for VmRSS
-- macOS (development): use `ps -o rss= -p <pid>`
+- `ChatPanel.tsx` -- main chat container
+- `MessageList.tsx` -- renders messages from chatStore
+- `MessageBubble.tsx` -- individual message (user or assistant)
+- `ToolUseCard.tsx` -- collapsible tool call display (name, status, result)
+- `InputBar.tsx` -- text input with Enter to send, interrupt shortcut
+- `SessionList.tsx` -- sidebar with session list, create new, switch
+- `ApprovalDialog.tsx` -- human-in-the-loop tool approval (US-011)
+- `ErrorBanner.tsx` -- contextual error messages (US-007)
+- `SessionWarning.tsx` -- duration/memory warning banner
 
-**Dependencies on**: config, models/session
+### 3.4 Infrastructure
 
-### 3.6 Session Manager (Layer 3)
+#### Dockerfile
 
-**What to build**: Central orchestrator for session lifecycle. Coordinates pool, monitor, extensions, and repository.
-
-**File to create**: `src/claude_sdk_pattern/core/session_manager.py`
-
-**Interface**:
-- `SessionManager.__init__(pool, monitor, loader, repo, config) -> None`
-- `SessionManager.create_session() -> SessionState`: Acquire from pool or cold start
-- `SessionManager.query(session_id: str, prompt: str) -> AsyncIterator[SDKMessage]`: Stream response
-- `SessionManager.interrupt(session_id: str) -> None`: Abort in-flight query
-- `SessionManager.list_sessions() -> list[SessionSummary]`
-- `SessionManager.get_session(session_id: str) -> Optional[SessionState]`
-- `SessionManager.destroy_session(session_id: str) -> None`: Cleanup subprocess
-- `SessionManager.resume_session(session_id: str) -> SessionState`: Resume from SDK storage
-- `SessionManager.shutdown() -> None`: Graceful shutdown all sessions
-
-**Session state tracking** (in-memory dict):
-- `sessions: dict[str, SessionState]` where SessionState contains: session_id, client (ClaudeSDKClient), pid, created_at, last_active, status, is_query_active
-
-**Query flow**:
-1. Validate session exists and status is active/idle
-2. Set is_query_active = True
-3. Call client.query(prompt)
-4. Iterate client.receive_response()
-5. Yield each SDK message (AssistantMessage, ToolUseBlock, ToolResultBlock, ResultMessage)
-6. On ResultMessage: update session metadata (cost, message count, last_active)
-7. Set is_query_active = False
-
-**Dependencies on**: prewarm_pool, subprocess_monitor, extension_loader, repository, config
-
-### 3.7 WebSocket Handler (Layer 4)
-
-**What to build**: FastAPI WebSocket endpoint that accepts connections, authenticates, routes messages, and streams SDK responses.
-
-**File to create**: `src/claude_sdk_pattern/api/websocket.py`
-
-**Endpoint**: `@app.websocket("/ws/v1/chat")`
-
-**Connection lifecycle**:
-1. Accept WebSocket upgrade
-2. Read API key from query parameter or header
-3. Validate against configured key
-4. If invalid: close with 1008 (Policy Violation)
-5. Send session_list to client
-6. Enter message loop: receive client messages, route to SessionManager, stream responses
-
-**Message routing**:
-- `user_message` -> SessionManager.query() -> stream responses as WebSocket frames
-- `interrupt` -> SessionManager.interrupt()
-- `create_session` -> SessionManager.create_session() -> send session_ready
-- `switch_session` -> Send message history for target session (from DB/cache)
-
-**Connection deduplication** (G-003):
-- Maintain `active_connections: dict[str, WebSocket]`
-- On new connection for existing session_id: send "session_opened_elsewhere" to old, close old
-
-**Dependencies on**: session_manager, auth, message_types
-
-### 3.8 REST API (Layer 4)
-
-**What to build**: REST endpoints for session management and health check.
-
-**File to create**: `src/claude_sdk_pattern/api/rest.py`
-
-**Endpoints**:
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | /api/v1/sessions | API key | List all sessions |
-| POST | /api/v1/sessions | API key | Create new session |
-| GET | /api/v1/sessions/{id} | API key | Get session details |
-| DELETE | /api/v1/sessions/{id} | API key | Destroy session |
-| GET | /api/v1/health/live | None | Liveness probe (process alive) |
-| GET | /api/v1/health/ready | None | Readiness probe (pool has capacity) |
-| GET | /api/v1/extensions | API key | List loaded extensions (mcp servers, skills, commands) |
-
-**Dependencies on**: session_manager, auth
-
-### 3.9 Application Entry Point (Layer 5)
-
-**What to build**: FastAPI application factory with startup/shutdown lifecycle events.
-
-**File to create**: `src/claude_sdk_pattern/main.py`
-
-**Startup sequence**:
-1. Load configuration from environment
-2. Initialize structlog
-3. Initialize SessionRepository (create tables)
-4. Initialize ExtensionLoader
-5. Initialize PreWarmPool
-6. Call pool.startup_fill() -- blocks until at least 1 pre-warm succeeds
-7. If startup_fill() returns False: log CRITICAL, exit(1)
-8. Initialize SubprocessMonitor
-9. Initialize SessionManager
-10. Mount WebSocket handler
-11. Mount REST routes
-12. Serve static frontend files
-13. Start SubprocessMonitor background tasks
-
-**Shutdown sequence**:
-1. Stop accepting new connections
-2. Notify all connected WebSockets: "server_shutting_down"
-3. Wait up to 30s for in-flight queries
-4. SessionManager.shutdown() -- destroy all sessions
-5. PreWarmPool.shutdown() -- drain pool
-6. Close database connection
-
-**Dependencies on**: All components
+- **File**: `Dockerfile`
+- **Responsibility**: Single container with backend + frontend static assets
+- **Key behaviors**:
+  - Multi-stage build: frontend build stage (Vite) + backend runtime stage (Python)
+  - FastAPI serves frontend static files + API endpoints
+  - Health check: `GET /api/v1/health/live`
+  - Env vars for configuration (see Section 4.4)
 
 ---
 
@@ -272,451 +214,529 @@
 
 ### 4.1 API Endpoints
 
-#### GET /api/v1/sessions
+#### AG-UI Endpoint
 
-**Request**:
-- Header: `X-API-Key: <key>`
-
-**Response** (200):
 ```
-{
-  "sessions": [
-    {
-      "session_id": "abc123",
-      "status": "active",
-      "created_at": "2026-02-07T10:30:00Z",
-      "last_active_at": "2026-02-07T11:15:00Z",
-      "message_count": 12,
-      "total_cost_usd": 0.48,
-      "is_resumable": true
-    }
-  ]
-}
-```
+POST /agent/run
+Content-Type: application/json
+Accept: text/event-stream
 
-**Error responses**:
-- 401: `{"error": "unauthorized", "message": "Invalid API key"}`
+Request (RunAgentInput):
+  thread_id: string          -- Session/thread identifier
+  run_id: string             -- Unique run identifier (client-generated UUID)
+  messages: Message[]        -- Conversation history
+  tools: ToolDefinition[]    -- Available tools (from extension config)
+  context: ContextItem[]     -- Additional context
+  state: object              -- Client state snapshot
+  forwarded_props: object    -- Additional properties
 
-#### POST /api/v1/sessions
+Response: SSE stream of AG-UI events (see Section 4.2)
 
-**Request**:
-- Header: `X-API-Key: <key>`
-- Body: `{}` (empty, no parameters for MVP)
-
-**Response** (201):
-```
-{
-  "session_id": "abc123",
-  "status": "active",
-  "source": "pre-warmed",
-  "created_at": "2026-02-07T10:30:00Z"
-}
+Error Responses:
+  404: {"error": "Session not found"}
+  409: {"error": "Run already in progress for this session"}  (EC-NEW-004)
+  503: {"error": "Server at capacity"}
 ```
 
-**Error responses**:
-- 401: `{"error": "unauthorized", "message": "Invalid API key"}`
-- 503: `{"error": "capacity_exceeded", "message": "Server at capacity. Max sessions: 10"}`
+#### OpenAI-Compliant Chat Completions
 
-#### DELETE /api/v1/sessions/{session_id}
-
-**Request**:
-- Header: `X-API-Key: <key>`
-
-**Response** (200):
 ```
-{
-  "session_id": "abc123",
-  "status": "terminated",
-  "reason": "user_requested"
-}
-```
+POST /v1/chat/completions
+Content-Type: application/json
 
-**Error responses**:
-- 401: `{"error": "unauthorized", "message": "Invalid API key"}`
-- 404: `{"error": "not_found", "message": "Session not found"}`
+Request:
+  model: string              -- Model identifier (mapped internally to Claude)
+  messages: OpenAIMessage[]  -- Array of {role, content} objects
+  stream: boolean            -- true for SSE, false for sync (default: false)
+  tools: OpenAITool[]        -- Optional tool definitions
+  max_tokens: integer        -- Optional token limit
+  temperature: number        -- Optional (silently ignored if unsupported)
 
-#### GET /api/v1/health/live
+Response (stream: true): SSE stream
+  data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"content":"text"}}]}
+  data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{"tool_calls":[...]}}]}
+  data: {"id":"chatcmpl-xxx","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{...}}
+  data: [DONE]
 
-**Request**: No auth required.
+Response (stream: false): JSON
+  {"id":"chatcmpl-xxx","choices":[{"index":0,"message":{"role":"assistant","content":"text"}}],"usage":{...}}
 
-**Response** (200):
-```
-{"status": "ok"}
-```
-
-#### GET /api/v1/health/ready
-
-**Request**: No auth required.
-
-**Response** (200):
-```
-{
-  "status": "ready",
-  "pool_depth": 2,
-  "active_sessions": 1,
-  "max_sessions": 5
-}
+Error Responses:
+  400: {"error":{"type":"invalid_request","message":"..."}}
+  503: {"error":{"type":"server_error","message":"Service temporarily at capacity. Retry in 30 seconds."}}
+       Header: Retry-After: 30
+  500: {"error":{"type":"server_error","message":"..."}}
+  429: {"error":{"type":"rate_limit","message":"..."}}
 ```
 
-**Response** (503):
+#### REST API
+
 ```
-{
-  "status": "not_ready",
-  "reason": "pool_empty",
-  "active_sessions": 5,
-  "max_sessions": 5
-}
+GET /api/v1/sessions
+Response: {"sessions": [SessionSummary]}
+
+POST /api/v1/sessions
+Request: {"resume_session_id": string (optional)}
+Response (201): {"session_id": string, "status": "ready"|"creating", "source": "pre-warm"|"cold", "estimated_seconds": number (if creating)}
+Response (503): {"error": "Server at capacity. Maximum 10 sessions."}
+
+GET /api/v1/sessions/{session_id}
+Response: SessionDetail
+Response (404): {"error": "Session not found"}
+
+DELETE /api/v1/sessions/{session_id}
+Response (204): (no body)
+Response (404): {"error": "Session not found"}
+
+GET /api/v1/sessions/{session_id}/tool-results/{tool_use_id}
+Response: {"tool_use_id": string, "content": string, "truncated": false}
+Response (404): {"error": "Tool result not found"}
+
+GET /api/v1/health/live
+Response: {"status": "ok"}
+
+GET /api/v1/health/ready
+Response: {"status": "ready"|"not_ready", "pool_depth": number, "active_sessions": number, "max_sessions": number}
+Response (503 if not ready): {"status": "not_ready", "reason": "Pool empty"}
+
+GET /api/v1/extensions
+Response: {"mcp_servers": [MCPServerInfo], "skills": [SkillInfo], "commands": [CommandInfo]}
 ```
 
-#### GET /api/v1/extensions
+### 4.2 Frontend-Backend Data Contracts
 
-**Request**:
-- Header: `X-API-Key: <key>`
+#### AG-UI Event Types (Backend -> Frontend)
 
-**Response** (200):
+**Lifecycle Events**:
 ```
-{
-  "mcp_servers": {
-    "github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"]},
-    "postgres": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-postgres"]}
-  },
-  "skills": [
-    {"name": "code-review", "path": "./skills/code-review/SKILL.md"}
-  ],
-  "commands": [
-    {"name": "deploy", "path": "./commands/deploy"}
-  ]
-}
-```
+RunStartedEvent:
+  type: "RUN_STARTED"
+  thread_id: string
+  run_id: string
 
-### 4.2 WebSocket Message Contracts
+RunFinishedEvent:
+  type: "RUN_FINISHED"
+  thread_id: string
+  run_id: string
 
-#### Client -> Server Messages
-
-**user_message**: Send a chat message to a session.
-```
-{
-  "type": "user_message",
-  "session_id": "abc123",
-  "text": "How many active users last month?",
-  "seq": 5
-}
-```
-- Validation: text must be non-empty, max 32,000 characters
-- Rejected if query already in flight for this session (returns error)
-
-**interrupt**: Abort the current streaming response.
-```
-{
-  "type": "interrupt",
-  "session_id": "abc123"
-}
-```
-- Idempotent: safe to send even if no query is active
-
-**create_session**: Request a new session.
-```
-{
-  "type": "create_session"
-}
+RunErrorEvent:
+  type: "RUN_ERROR"
+  thread_id: string
+  run_id: string
+  error: {type: string, message: string}
 ```
 
-**switch_session**: Switch active view to a different session.
+**Text Message Events**:
 ```
-{
-  "type": "switch_session",
-  "session_id": "def456"
-}
+TextMessageStartEvent:
+  type: "TEXT_MESSAGE_START"
+  message_id: string
+  role: "assistant"
+
+TextMessageContentEvent:
+  type: "TEXT_MESSAGE_CONTENT"
+  message_id: string
+  delta: string                -- Text chunk
+
+TextMessageEndEvent:
+  type: "TEXT_MESSAGE_END"
+  message_id: string
 ```
 
-**destroy_session**: Terminate and clean up a session.
+**Tool Call Events**:
 ```
-{
-  "type": "destroy_session",
-  "session_id": "abc123"
-}
+ToolCallStartEvent:
+  type: "TOOL_CALL_START"
+  tool_call_id: string
+  tool_call_name: string       -- e.g. "mcp__github__list_issues"
+  parent_message_id: string
+
+ToolCallArgsEvent:
+  type: "TOOL_CALL_ARGS"
+  tool_call_id: string
+  delta: string                -- JSON args chunk
+
+ToolCallEndEvent:
+  type: "TOOL_CALL_END"
+  tool_call_id: string
+
+ToolResultEvent:
+  type: "TOOL_RESULT"
+  tool_call_id: string
+  content: string              -- Result text (truncated if >1MB)
+  truncated: boolean           -- If true, full result at REST endpoint
 ```
 
-#### Server -> Client Messages
-
-**session_list**: Sent on initial connection. List of all sessions.
+**State Events**:
 ```
-{
-  "type": "session_list",
-  "sessions": [
-    {
-      "session_id": "abc123",
-      "status": "active",
-      "created_at": "2026-02-07T10:30:00Z",
-      "last_active_at": "2026-02-07T11:15:00Z",
-      "message_count": 12
-    }
-  ]
-}
+StateSnapshotEvent:
+  type: "STATE_SNAPSHOT"
+  snapshot: object             -- Full agent state
+
+StateDeltaEvent:
+  type: "STATE_DELTA"
+  delta: JSONPatch[]           -- Incremental state changes
 ```
 
-**session_ready**: Session created and ready for messages.
+**Custom Events (Platform-Specific)**:
 ```
-{
-  "type": "session_ready",
-  "session_id": "abc123",
-  "status": "ready",
-  "source": "pre-warmed"
-}
+CustomEvent:
+  type: "CUSTOM"
+  name: string                 -- Event name (see below)
+  value: object                -- Event payload
+
+Custom event names and payloads:
+
+"session_warning":
+  value: {reason: "duration"|"memory", remaining_seconds: number, message: string}
+
+"session_terminated":
+  value: {reason: "duration_limit"|"memory_limit"|"error", message: string, resume_session_id: string}
+
+"session_restarting":
+  value: {reason: "memory_limit", message: string}
+
+"session_resumed":
+  value: {session_id: string, message: string}
 ```
 
-**session_creating**: Session being created via cold start.
+#### AG-UI Client Actions (Frontend -> Backend)
+
+**Start Run**:
 ```
-{
-  "type": "session_creating",
-  "estimated_seconds": 30
-}
+POST /agent/run with RunAgentInput body
 ```
 
-**message_received**: Acknowledgment that user message was received.
+**Cancel Run**:
 ```
-{
-  "type": "message_received",
-  "seq": 5
-}
+Mechanism: Client aborts the HTTP request (closes the SSE connection)
+Backend detects disconnect, aborts the in-flight run
 ```
 
-**stream_delta**: Streaming text token from Claude.
+**Resume Run (Human-in-the-loop)**:
 ```
-{
-  "type": "stream_delta",
-  "session_id": "abc123",
-  "delta": "I'll",
-  "seq": 6
-}
+POST /agent/run with RunAgentInput including:
+  messages: [...previous, {role: "tool_result", tool_use_id: string, content: string, is_error: boolean}]
 ```
 
-**tool_use**: Claude is invoking a tool.
+#### Zustand Store Shapes
+
 ```
-{
-  "type": "tool_use",
-  "session_id": "abc123",
-  "tool_use_id": "tu_123",
-  "tool": "mcp__postgres__execute_sql",
-  "input": {"query": "SELECT COUNT(*) FROM users WHERE last_active > ..."},
-  "seq": 20
-}
+ChatStore:
+  messages: Record<string, ChatMessage[]>  -- keyed by session_id
+  addUserMessage(sessionId, text): void
+  addAssistantMessage(sessionId, messageId, content): void
+  addToolCall(sessionId, toolCallId, toolName, status, result): void
+  updateToolCall(sessionId, toolCallId, updates): void
+
+SessionStore:
+  sessions: SessionSummary[]
+  activeSessionId: string | null
+  runState: "idle" | "running" | "error"
+  setActiveSession(sessionId): void
+  createSession(): Promise<string>
+  refreshSessions(): Promise<void>
+
+ToolStore:
+  pendingApprovals: ApprovalRequest[]
+  approveToolCall(toolCallId): void
+  rejectToolCall(toolCallId): void
+
+UIStore:
+  isSending: boolean
+  error: {message: string, action: string} | null
+  warning: {message: string, remainingSeconds: number} | null
+  clearError(): void
+  clearWarning(): void
 ```
 
-**tool_result**: Tool execution completed.
-```
-{
-  "type": "tool_result",
-  "session_id": "abc123",
-  "tool_use_id": "tu_123",
-  "result": {"count": 45231},
-  "status": "success",
-  "duration_ms": 1200,
-  "seq": 21
-}
-```
-- status values: "success" | "error"
-- On error: result contains `{"error": "Connection refused"}`
+### 4.3 Component Integration Specs
 
-**response_complete**: Claude finished responding.
+#### SessionManager <-> PreWarmPool
+
 ```
-{
-  "type": "response_complete",
-  "session_id": "abc123",
-  "cost_usd": 0.024,
-  "turn_count": 3,
-  "seq": 35
-}
+Interface:
+  PreWarmPool.get() -> ClaudeSDKClient | None
+  PreWarmPool.replenish() -> None (background task)
+  PreWarmPool.size() -> int (current pool depth)
+  PreWarmPool.fill(target: int) -> bool (at least 1 success required)
+
+Contract:
+  - get() is non-blocking; returns None if pool empty
+  - replenish() runs as asyncio.Task; does not block caller
+  - fill() blocks until at least 1 client initialized OR all attempts fail
+  - Each client in pool has a ClaudeAgentOptions built by OptionsBuilder
 ```
 
-**stream_error**: Error during streaming.
-```
-{
-  "type": "stream_error",
-  "session_id": "abc123",
-  "error": "Response interrupted due to API timeout",
-  "partial_preserved": true,
-  "suggested_action": "retry",
-  "seq": 25
-}
-```
+#### SessionManager <-> SubprocessMonitor
 
-**stream_interrupted**: User-initiated interrupt completed.
 ```
-{
-  "type": "stream_interrupted",
-  "session_id": "abc123",
-  "seq": 26
-}
+Interface:
+  SubprocessMonitor.register(session_id, pid) -> None
+  SubprocessMonitor.unregister(session_id) -> None
+  SubprocessMonitor.start() -> None (launches background tasks)
+  SubprocessMonitor.stop() -> None (cancels background tasks)
+
+Contract:
+  - register() called when session created (after subprocess PID captured)
+  - unregister() called when session destroyed
+  - Monitor emits events via callback: on_warning(session_id, event), on_terminate(session_id, reason)
+  - SessionManager handles callbacks: notify user via AG-UI, trigger restart/cleanup
 ```
 
-**session_warning**: Session approaching limits.
-```
-{
-  "type": "session_warning",
-  "session_id": "abc123",
-  "reason": "duration",
-  "remaining_seconds": 1440,
-  "message": "Session will end in 24 minutes. Save your work."
-}
-```
+#### SessionManager <-> JSONSessionIndex
 
-**session_terminated**: Session ended.
 ```
-{
-  "type": "session_terminated",
-  "session_id": "abc123",
-  "reason": "duration_limit",
-  "message": "Session ended (4-hour limit reached).",
-  "resume_url": "/chat?resume=abc123"
-}
+Interface:
+  JSONSessionIndex.init() -> None (create dir + file if missing)
+  JSONSessionIndex.create(session_id, metadata) -> None
+  JSONSessionIndex.update(session_id, updates) -> None
+  JSONSessionIndex.get(session_id) -> SessionMetadata | None
+  JSONSessionIndex.list() -> list[SessionMetadata]
+  JSONSessionIndex.delete(session_id) -> None
+
+Contract:
+  - All write operations are atomic (temp file + rename)
+  - All write operations acquire file lock via filelock
+  - Read operations do not require lock (atomic rename guarantees consistency)
+  - SessionMetadata includes: session_id, status, created_at, last_active_at, message_count, title, terminated_reason
 ```
 
-**session_restarting**: Session restarting due to memory.
+#### AG-UI Endpoint <-> SessionManager
+
 ```
-{
-  "type": "session_restarting",
-  "session_id": "abc123",
-  "reason": "memory_limit",
-  "message": "Session restarting to maintain performance. Your conversation will be preserved."
-}
+Interface:
+  SessionManager.query(session_id, prompt) -> AsyncIterator[SDKEvent]
+  SessionManager.interrupt(session_id) -> None
+  SessionManager.is_run_active(session_id) -> bool
+
+Contract:
+  - query() yields SDK stream events as they arrive
+  - AG-UI endpoint translates each SDK event to AG-UI event type
+  - If is_run_active() returns True, reject new run with error (G-003)
+  - interrupt() sends abort signal; subsequent events may still arrive before stream ends
 ```
 
-**error**: General error.
+#### OpenAI Endpoint <-> SessionManager
+
 ```
-{
-  "type": "error",
-  "code": "query_in_progress",
-  "message": "Please wait for the current response to complete."
-}
+Interface:
+  SessionManager.acquire_session() -> tuple[session_id, ClaudeSDKClient] | None
+  SessionManager.release_session(session_id) -> None
+  SessionManager.query(session_id, prompt) -> AsyncIterator[SDKEvent]
+
+Contract:
+  - acquire_session() gets a session for the API call (from pool or creates new)
+  - Returns None if at capacity (endpoint returns 503)
+  - release_session() returns session to pool or destroys it
+  - OpenAI endpoint manages session lifecycle (acquire -> query -> release) per request
 ```
-- Error codes: "query_in_progress", "session_not_found", "invalid_message", "invalid_json", "capacity_exceeded", "internal_error"
 
-### 4.3 Frontend-Backend Data Contracts
+#### ExtensionLoader <-> OptionsBuilder
 
-#### SessionSummary (used in session_list and REST API)
+```
+Interface:
+  ExtensionLoader.scan() -> ExtensionConfig
+  ExtensionConfig:
+    mcp_servers: dict[str, MCPServerConfig]
+    skill_directories: list[str]
+    commands: list[CommandConfig]
+    env_vars: dict[str, str] (sanitized)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| session_id | string | UUID |
-| status | "creating" or "active" or "idle" or "terminated" | Current state |
-| created_at | string (ISO 8601) | When session was created |
-| last_active_at | string (ISO 8601) | Last message timestamp |
-| message_count | integer | Total messages exchanged |
-| total_cost_usd | number | Cumulative API cost |
-| is_resumable | boolean | Whether session can be resumed |
+Contract:
+  - scan() re-reads filesystem each call (cheap, < 1ms)
+  - OptionsBuilder merges ExtensionConfig into ClaudeAgentOptions
+  - Invalid mcp.json: returns empty mcp_servers, logs error
+  - Missing directories: returns empty lists, no error
+```
 
-#### ToolUseDisplay (used in tool_use and tool_result messages)
+### 4.4 User Input Specs
 
-| Field | Type | Description |
-|-------|------|-------------|
-| tool_use_id | string | Unique ID for this tool invocation |
-| tool | string | Tool name (e.g., "mcp__postgres__execute_sql") |
-| input | object | Tool input parameters (JSON) |
-| status | "executing" or "success" or "error" | Current execution state |
-| result | object or null | Tool result (null while executing) |
-| duration_ms | integer or null | Execution time (null while executing) |
-| error | string or null | Error message (null if success) |
+#### Environment Variables (Platform Configuration)
 
-#### ExtensionInfo (used in GET /api/v1/extensions)
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `ANTHROPIC_API_KEY` | string | required | Claude API key |
+| `PREWARM_POOL_SIZE` | int | 2 | Number of pre-warmed sessions |
+| `MAX_SESSIONS` | int | 10 | Maximum concurrent sessions |
+| `MAX_SESSION_DURATION_SECONDS` | int | 14400 | Session duration limit (4h) |
+| `MAX_SESSION_RSS_MB` | int | 2048 | RSS threshold for graceful restart |
+| `SESSION_INDEX_DIR` | string | ~/.claude-web/sessions | Session index file location |
+| `HOST` | string | 0.0.0.0 | Server bind address |
+| `PORT` | int | 8000 | Server port |
+| `CORS_ORIGINS` | string | * | Allowed CORS origins (comma-separated) |
+| `LOG_LEVEL` | string | INFO | Logging level |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| mcp_servers | object | Map of server name to config (command, args, env) |
-| skills | array of {name, path} | Discovered skill directories |
-| commands | array of {name, path} | Discovered command files |
+#### Chat Input Validation (Frontend -> Backend)
 
-### 4.4 User Input Validation Specs
+| Field | Validation | Error Message |
+|-------|------------|---------------|
+| message text | Non-empty, max 32,000 chars | "Message cannot be empty" / "Message too long (max 32,000 characters)" |
+| session_id | Valid UUID format, exists in index | "Invalid session ID" / "Session not found" |
+| run_id | Valid UUID format | "Invalid run ID" |
 
-| Input | Max Length | Allowed Characters | Validation Rule | Error Message |
-|-------|-----------|-------------------|-----------------|---------------|
-| User message text | 32,000 chars | Any UTF-8 | Non-empty after trim; max length | "Message is empty" or "Message exceeds 32,000 character limit" |
-| API key (header) | 256 chars | ASCII printable | Exact match with configured key | "Invalid API key" |
-| session_id (param) | 36 chars | UUID format | Must exist in session map | "Session not found" |
-| seq (field) | N/A | Positive integer | Monotonically increasing per connection | "Invalid sequence number" |
+#### OpenAI API Request Validation
+
+| Field | Validation | Error Response |
+|-------|------------|---------------|
+| model | Required string | 400: "model is required" |
+| messages | Required, non-empty array | 400: "messages is required and must be non-empty" |
+| messages[].role | One of: system, user, assistant, tool | 400: "Invalid message role" |
+| messages[].content | Required string | 400: "Message content is required" |
+| stream | Optional boolean (default false) | 400: "stream must be a boolean" |
+| tools | Optional array | Validated if present; invalid tools logged and ignored |
+| max_tokens | Optional positive integer | 400: "max_tokens must be a positive integer" |
+| temperature, top_p, etc. | Optional | Silently ignored (EC-NEW-008) |
 
 ---
 
 ## 5. Data Models
 
-### 5.1 SessionMetadata (SQLite)
+### SessionMetadata (JSON Session Index)
 
-| Field | Type | Nullable | Default | Description |
-|-------|------|----------|---------|-------------|
-| session_id | TEXT PK | No | generated UUID | Session identifier |
-| user_id | TEXT | No | "default" | Placeholder for Phase 2 multi-user |
-| status | TEXT | No | "creating" | creating/active/idle/terminated |
-| created_at | TEXT | No | now() | ISO 8601 timestamp |
-| last_active_at | TEXT | No | now() | Last message time |
-| subprocess_pid | INTEGER | Yes | NULL | CLI subprocess PID |
-| message_count | INTEGER | No | 0 | Total messages |
-| total_cost_usd | REAL | No | 0.0 | Cumulative API cost |
-| is_resumable | BOOLEAN | No | TRUE | Can this session be resumed |
-| terminated_reason | TEXT | Yes | NULL | Why session ended |
+```
+SessionMetadata:
+  session_id: string (UUID)
+  status: "pre-warmed" | "creating" | "active" | "idle" | "terminated"
+  source: "pre-warm" | "cold"
+  created_at: string (ISO 8601)
+  last_active_at: string (ISO 8601)
+  message_count: int
+  title: string (auto-generated from first user message, max 100 chars)
+  cost_usd: float (if available from SDK)
+  terminated_reason: string | null ("duration_limit" | "memory_limit" | "user_request" | "error")
+  subprocess_pid: int | null
+  is_resumable: boolean
+```
 
-### 5.2 SessionState (In-Memory)
+### Session Index File Structure
 
-| Field | Type | Description |
-|-------|------|-------------|
-| session_id | str | UUID |
-| client | ClaudeSDKClient | SDK client instance |
-| pid | int | Subprocess PID (for monitoring) |
-| created_at | datetime | Creation time |
-| last_active_at | datetime | Last activity |
-| status | SessionStatus enum | creating/active/idle/restarting/terminated |
-| is_query_active | bool | Whether a query is currently in flight |
-| websocket | Optional[WebSocket] | Active WebSocket connection (if any) |
-| options | ClaudeAgentOptions | Options used to create this session |
+```
+~/.claude-web/sessions/
+  index.json          -- Array of SessionMetadata objects
+  index.json.bak      -- Backup from previous successful write
+  index.json.lock     -- Lock file managed by filelock
+```
 
-### 5.3 ExtensionConfig (Runtime)
+### ChatMessage (Frontend Zustand Store)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| mcp_servers | dict[str, MCPServerConfig] | From mcp.json |
-| setting_sources | list[str] | ["user", "project"] if skills exist |
-| skill_directories | list[str] | Paths to discovered skill dirs |
-| commands | list[CommandDef] | Discovered command definitions |
-| loaded_at | datetime | When config was last loaded |
+```
+ChatMessage:
+  id: string (UUID)
+  session_id: string
+  role: "user" | "assistant" | "tool_use" | "tool_result" | "error"
+  content: string
+  timestamp: string (ISO 8601)
+  tool_calls: ToolCallInfo[] (for assistant messages with tools)
+  is_partial: boolean (true while streaming)
+  cost_usd: number | null
 
-### 5.4 MCPServerConfig
+ToolCallInfo:
+  tool_call_id: string
+  tool_name: string
+  status: "executing" | "complete" | "error"
+  input_args: string (JSON)
+  result: string | null
+  result_truncated: boolean
+  execution_duration_ms: number | null
+```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| command | str | Executable command (e.g., "npx") |
-| args | list[str] | Command arguments |
-| env | Optional[dict[str, str]] | Environment variables for the server |
+### ExtensionConfig
+
+```
+MCPServerConfig:
+  name: string
+  command: string
+  args: string[]
+  env: Record<string, string> (sanitized)
+  transport: "stdio"
+
+SkillInfo:
+  name: string
+  path: string (directory path)
+  has_skill_md: boolean
+
+CommandInfo:
+  name: string
+  path: string
+```
+
+### Health Response
+
+```
+LivenessResponse:
+  status: "ok"
+
+ReadinessResponse:
+  status: "ready" | "not_ready"
+  pool_depth: int
+  active_sessions: int
+  max_sessions: int
+  reason: string | null (if not_ready)
+```
 
 ---
 
 ## 6. Risks and Mitigations
 
-| Risk | Probability | Impact | Mitigation in Architecture |
-|------|------------|--------|---------------------------|
-| **SDK memory leak causes OOM** | High | Server crash | SubprocessMonitor: RSS monitoring every 30s, 2GB threshold (~3x baseline) triggers graceful restart (EC-004); 4h duration limit (EC-003); 16GB host supports up to 10 sessions with headroom |
-| **Pre-warm pool exhaustion** | Medium | Users wait 30s | Cold start fallback with progress UI (EC-001); pool replenishes in background; readiness probe checks pool depth |
-| **Zombie subprocess accumulation** | Medium | Gradual memory leak | SubprocessMonitor: periodic zombie cleanup every 60s; PID tracking for all sessions (G-001); SIGTERM/SIGKILL protocol |
-| **SDK breaking changes** | High | Parts of platform break | Pin to ~0.1.30; ExtensionLoader isolates SDK config building; budget 1 day/month for upgrade testing |
-| **WebSocket drops in production** | Medium | User loses streaming context | Basic reconnection (client-side); full message replay deferred to Phase 2 (EC-036); server buffers results for 60s on disconnect |
-| **Invalid mcp.json crashes session** | Low | Session fails to start | ExtensionLoader validates JSON syntax; invalid config logged, excluded; session starts with remaining valid extensions |
-| **Anthropic launches hosted Claude Code** | Medium | Reduced differentiation | Ship fast (4 weeks); differentiate on self-hosted + extension model; pivot to niche if needed |
+| Risk | Severity | Probability | Mitigation | Owner |
+|------|----------|-------------|------------|-------|
+| SDK memory leak causes OOM | CRITICAL | High | 4h duration limit (configurable); 2GB RSS threshold with graceful restart; container memory limit as safety net | Backend |
+| 30s cold start when pool exhausted | HIGH | Medium | Pre-warm pool (mandatory, size >= 2); cold start UI with progress indicator; pool auto-replenishment | Backend |
+| AG-UI protocol immaturity | HIGH | Medium | Use ag_ui.core for types (protocol compliance); custom SSE streaming on FastAPI (full control); monitor spec changes | Backend |
+| SDK breaking changes | HIGH | High (80%) | Pin version ~=0.1.30 (patch updates only); 1 day/month upgrade testing budget; test in staging before production | Backend |
+| Zombie subprocess accumulation | MEDIUM | Medium | PID tracking on session create; SIGTERM/SIGKILL on destroy; periodic zombie scan every 60s | Backend |
+| JSON session index corruption | MEDIUM | Medium | Atomic writes (temp + rename); file locking; .bak recovery; session content preserved in SDK JSONL files | Backend |
+| Anthropic launches hosted Claude Code | CRITICAL | Medium (40%) | Ship MVP fast; differentiate on extension model and domain-specific UIs; monitor announcements | Product |
+| No auth allows unauthorized access | HIGH | Low (internal network) | VPN/firewall; auth boundary designed to be addable in Phase 2 without restructuring | Ops |
+| AG-UI event delivery failure for large payloads | MEDIUM | Low | Truncate tool results > 1MB; full result available via REST endpoint | Backend |
+| Pre-warm pool fails on startup | HIGH | Low | Validate API key first; fail startup if all pre-warm attempts fail; clear error logging | Backend |
 
 ---
 
 ## 7. Next Steps
 
-After this plan is approved:
+### Immediate (After Architecture Approval)
 
-1. **Run `sdlc-task-breakdown --name core-engine`** to generate JIRA-format task cards from this implementation plan
-2. **Create feature branch**: `feature/core-engine-mvp`
-3. **Initialize project**: pyproject.toml with uv, Vite frontend scaffold
-4. **Build in dependency order**: Layer 0 -> Layer 5 as specified in architecture Section 8
-5. **Integration test at each layer**: Ensure contracts are honored before building next layer
+1. Run `sdlc-task-breakdown --name core-engine` to create JIRA-format task breakdown from this implementation plan
+2. Tasks will be organized by component with dependencies and effort estimates
+3. Implementation order follows critical path: SessionManager + PreWarmPool first (P0), then AG-UI endpoint, then OpenAI API, then REST API, then frontend, then Docker
 
-**Handoff artifacts**:
-- `task_core-engine/plan/strategy/implementation_plan.md` (this document)
-- `task_core-engine/plan/strategy/architecture.md`
-- `task_core-engine/plan/decision-log.md`
-- `task_core-engine/plan/status.md`
+### Phase 1 MVP Critical Path
+
+```
+Week 1: Core backend
+  SessionManager + PreWarmPool + SubprocessMonitor + JSONSessionIndex
+  ExtensionLoader + OptionsBuilder
+
+Week 2: API layer
+  AG-UI endpoint + event translation
+  OpenAI-compliant API + adapter
+  REST API endpoints
+
+Week 3: Frontend
+  Zustand stores + AG-UI client
+  React components (ChatPanel, MessageList, InputBar, ToolUseCard)
+  Session management UI (SessionList, create, switch, resume)
+
+Week 4: Integration + Docker
+  End-to-end integration testing
+  Dockerfile + docker-compose
+  Health checks + startup validation
+  Load testing (10 concurrent sessions on 16GB)
+```
+
+### Phase 2 Handoff Points
+
+| Phase 1 Boundary | Phase 2 Extension |
+|-------------------|-------------------|
+| No auth (all endpoints open) | JWT/Keycloak middleware + AG-UI/REST headers |
+| JSONSessionIndex | SQLite migration (if user count grows) |
+| ExtensionLoader (filesystem scan) | PluginRegistry (manifest validation, lifecycle, secrets) |
+| File-based extensions | Hot-reload via filesystem watcher |
+| No cost tracking | Per-user cost tracking and caps |
+| No RBAC | Three-role permission system |
+| In-process extensions (no isolation) | Subprocess isolation for plugins |
 
 ---
 
