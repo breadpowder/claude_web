@@ -82,7 +82,7 @@ def sdk_event_to_chunk(
                 "tool_calls": [
                     {
                         "index": tool_call_index,
-                        "id": f"call_{uuid.uuid4().hex[:24]}",
+                        "id": event.get("id", f"call_{uuid.uuid4().hex[:24]}"),
                         "type": "function",
                         "function": {
                             "name": event.get("name", ""),
@@ -95,8 +95,29 @@ def sdk_event_to_chunk(
         return chunk, tool_call_index + 1
 
     if event_type == "tool_result":
-        # Suppress tool results from SSE stream
-        return None, tool_call_index
+        # Forward tool results as vendor extension field
+        chunk = _make_chunk(
+            request_id,
+            delta={
+                "tool_result": {
+                    "tool_use_id": event.get("tool_use_id", ""),
+                    "content": event.get("content", ""),
+                    "is_error": event.get("is_error", False),
+                },
+            },
+        )
+        return chunk, tool_call_index
+
+    if event_type == "result_metadata":
+        # Forward completion metadata as vendor extension field
+        chunk = _make_chunk(request_id, delta={})
+        chunk["meta"] = {
+            "num_turns": event.get("num_turns", 0),
+            "total_cost_usd": event.get("total_cost_usd", 0),
+            "duration_ms": event.get("duration_ms", 0),
+            "usage": event.get("usage", {}),
+        }
+        return chunk, tool_call_index
 
     if event_type == "text" or "content" in event:
         content = event.get("content", event.get("text", ""))

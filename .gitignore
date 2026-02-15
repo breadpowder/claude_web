@@ -40,3 +40,25 @@ docker/*.log
 
 # Task workspace (local context, never commit)
 task_*/
+
+# Generated documents
+*.docx
+*.xlsx
+*.~lock.*
+
+# One-off scripts (not part of the application)
+create-npm-review-doc.js
+create_frozen_scripts.js
+
+# Dev notes (internal only)
+dev/
+
+# Root-level npm (docx generation tooling, not the app)
+/package.json
+/package-lock.json
+
+# Internal reference docs
+claudesdk_integration.md
+
+# Pytest cache
+.pytest_cache/

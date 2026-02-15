@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enhanced Multi-Step Reasoning UX - Mockup v3</title>
+<style>
+  :root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-input: #0f1629;
+    --bg-message-user: #7c3aed;
+    --bg-message-assistant: #1e293b;
+    --text-primary: #e2e8f0;
+    --text-muted: #94a3b8;
+    --accent: #7c3aed;
+    --accent-hover: #6d28d9;
+    --border-color: #334155;
+    --error: #ef4444;
+    --warning: #f59e0b;
+    --success: #22c55e;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    font-size: 13px;
+  }
+  .header .title { font-weight: 600; font-size: 15px; }
+  .header .status { color: var(--success); }
+  .header .session-id { color: var(--text-muted); font-family: monospace; font-size: 11px; }
+  .header .extensions { color: var(--accent); margin-left: auto; }
+
+  .mockup-tabs {
+    display: flex;
+    gap: 0;
+    background: #0d1117;
+    border-bottom: 2px solid var(--accent);
+    padding: 0 16px;
+    overflow-x: auto;
+  }
+  .mockup-tab {
+    padding: 10px 18px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    border: none;
+    background: none;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    white-space: nowrap;
+  }
+  .mockup-tab:hover { color: var(--text-primary); }
+  .mockup-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: rgba(124, 58, 237, 0.08);
+  }
+  .mockup-label {
+    padding: 6px 16px;
+    background: rgba(124, 58, 237, 0.1);
+    font-size: 11px;
+    color: var(--accent);
+    text-align: center;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+  }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .message {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .message.user {
+    align-self: flex-end;
+    background: var(--bg-message-user);
+    border-bottom-right-radius: 4px;
+  }
+  .message.assistant {
+    align-self: flex-start;
+    background: var(--bg-message-assistant);
+    border-bottom-left-radius: 4px;
+    max-width: 90%;
+  }
+
+  /* === TOOL STEPS (compact, CLI-like) === */
+  .tool-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-bottom: 6px;
+  }
+
+  .tool-step {
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  /* G1: Filled circle step marker replaces chevron + status-icon */
+  .step-marker {
+    width: 10px;
+    height: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 8px;
+    line-height: 1;
+  }
+  .step-marker[data-status="completed"] { color: var(--success); }
+  .step-marker[data-status="running"] { color: var(--accent); }
+  .step-marker[data-status="error"] { color: var(--error); }
+  .step-marker[data-status="cancelled"] { color: var(--warning); }
+
+  /* G3: Hover expand affordance */
+  .expand-hint {
+    width: 10px;
+    flex-shrink: 0;
+    font-size: 8px;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .tool-step-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px; /* G5: tighter vertical spacing */
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    transition: background 0.15s;
+    line-height: 1.4;
+    position: relative;
+  }
+  .tool-step-header:hover {
+    background: rgba(124, 58, 237, 0.08);
+  }
+  .tool-step-header:hover .expand-hint {
+    opacity: 0.4;
+  }
+  .tool-step-header[tabindex] { outline: none; }
+  .tool-step-header:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  /* V2.1: Running step highlight */
+  .tool-step-header.running-row {
+    background: rgba(124, 58, 237, 0.05);
+    border-left: 2px solid var(--accent);
+    padding-left: 6px;
+  }
+
+  /* V4.1: Error step highlight */
+  .tool-step-header.error-row {
+    background: rgba(239, 68, 68, 0.06);
+  }
+
+  .spinner {
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid rgba(124, 58, 237, 0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* G2: Tool name + parenthesized args as one visual unit */
+  .tool-name {
+    color: var(--text-primary);
+    flex-shrink: 0;
+    font-weight: 500;
+  }
+  .tool-paren {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .tool-args-inline {
+    color: var(--text-muted);
+    font-size: 12px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tool-paren-close {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .tool-timing {
+    color: var(--text-muted);
+    font-size: 11px;
+    flex-shrink: 0;
+    margin-left: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .tool-timing.pulse {
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+
+  /* V4.1: Error badge */
+  .error-badge {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--error);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+  }
+
+  /* V4.3: Retry annotation */
+  .retry-annotation {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    padding: 0 8px 0 24px;
+    opacity: 0.7;
+  }
+
+  /* G4: Result preview with CLI corner connector */
+  .result-preview {
+    display: flex;
+    gap: 6px;
+    padding: 0 8px 2px 24px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.3;
+  }
+  .result-connector {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    font-size: 13px;
+    line-height: 1;
+    margin-top: 1px;
+  }
+  .result-preview-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Expanded detail panel */
+  .tool-step-detail {
+    margin: 0 8px 2px 24px; /* G5: tighter spacing */
+    padding: 6px 10px;
+    background: rgba(15, 22, 41, 0.6);
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.2s ease-out, padding 0.2s ease-out;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .tool-step-detail[data-status="completed"] { border-left: 2px solid var(--success); }
+  .tool-step-detail[data-status="error"] { border-left: 2px solid var(--error); }
+  .tool-step-detail[data-status="cancelled"] { border-left: 2px solid var(--warning); }
+  .tool-step-detail:not([data-status]) { border-left: 2px solid var(--accent); }
+
+  .tool-step-detail.visible {
+    max-height: 400px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    overflow-y: auto;
+  }
+
+  /* V3.2: Detail labels - normal case, no uppercase */
+  .detail-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 2px;
+    margin-top: 6px;
+  }
+  .detail-label:first-child { margin-top: 0; }
+
+  .detail-content {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    color: var(--text-primary);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    max-height: 180px;
+    overflow-y: auto;
+    position: relative;
+  }
+  /* Scroll fade indicator */
+  .detail-content-wrap {
+    position: relative;
+  }
+  .detail-content-wrap::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 20px;
+    background: linear-gradient(transparent, rgba(15, 22, 41, 0.8));
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .detail-content-wrap.has-overflow::after { opacity: 1; }
+
+  .detail-content.error-content {
+    color: var(--error);
+    background: rgba(239, 68, 68, 0.08);
+    padding: 4px 6px;
+    border-radius: 3px;
+  }
+
+  /* V4.2: Copy error button */
+  .copy-error-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 10px;
+    cursor: pointer;
+    margin-top: 4px;
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.03);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .copy-error-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--text-muted);
+  }
+
+  .show-full {
+    color: var(--accent);
+    font-size: 11px;
+    cursor: pointer;
+    margin-top: 2px;
+    border: none;
+    background: none;
+    padding: 0;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .show-full:hover { text-decoration: underline; }
+
+  /* V6: Collapsed summary */
+  .collapsed-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.15s;
+  }
+  .collapsed-summary:hover {
+    background: rgba(124, 58, 237, 0.08);
+    color: var(--text-primary);
+  }
+  .collapsed-summary .collapse-icon {
+    font-size: 8px;
+    transition: transform 0.2s;
+  }
+  .collapsed-summary.expanded .collapse-icon {
+    transform: rotate(90deg);
+  }
+
+  /* V6.2: Smooth expand animation for collapsed steps */
+  .expanded-steps-wrap {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+  }
+  .expanded-steps-wrap.visible {
+    max-height: 500px;
+  }
+
+  .streaming-footer {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 14px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    position: relative;
+    overflow: hidden;
+  }
+  /* V2.3: Shimmer animation on streaming footer */
+  .streaming-footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(124, 58, 237, 0.05), transparent);
+    animation: shimmer 2s infinite;
+  }
+  @keyframes shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+  }
+
+  /* G7: Completion meta - left aligned with top border */
+  .completion-meta {
+    text-align: left;
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text-muted);
+    padding: 6px 14px;
+    border-top: 1px solid var(--border-color);
+    animation: fadeIn 0.3s ease-in;
+  }
+  .completion-meta.interrupted { color: var(--warning); }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* V5.2: Interrupted separator bar */
+  .interrupted-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 12px;
+    margin-top: 6px;
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--warning);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  /* V5.3: Fade-out for truncated content */
+  .truncated-content {
+    position: relative;
+  }
+  .truncated-content::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 24px;
+    background: linear-gradient(transparent, var(--bg-message-assistant));
+    pointer-events: none;
+  }
+
+  .input-area {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+  }
+  .input-area textarea {
+    flex: 1;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    resize: none;
+    min-height: 42px;
+    outline: none;
+  }
+  .input-area textarea:disabled { opacity: 0.5; }
+
+  .btn-send {
+    padding: 0 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    min-width: 80px;
+    height: 42px;
+    transition: background 0.15s;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .btn-send.send { background: var(--accent); color: white; }
+  .btn-send.send:hover { background: var(--accent-hover); }
+  .btn-send.stop { background: var(--error); color: white; }
+  .btn-send.stop:hover { background: #dc2626; }
+
+  /* V2.4: Thinking indicator - compact subordinate annotation */
+  .thinking-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    margin-bottom: 2px;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .thinking-dots {
+    display: inline-flex;
+    gap: 2px;
+  }
+  .thinking-dots span {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    animation: thinkingDot 1.4s ease-in-out infinite;
+  }
+  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes thinkingDot {
+    0%, 80%, 100% { opacity: 0.2; }
+    40% { opacity: 1; }
+  }
+
+  .view { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+  .view.active { display: flex; }
+
+  .comparison {
+    display: flex;
+    gap: 16px;
+    flex: 1;
+    overflow: hidden;
+    padding: 16px;
+  }
+  .comparison-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .comparison-label {
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+  .comparison-label.old { background: rgba(239, 68, 68, 0.15); color: var(--error); }
+  .comparison-label.new { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+  .comparison-content {
+    flex: 1;
+    padding: 12px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .old-tool-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(124, 58, 237, 0.15);
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin: 2px 0;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  .old-tool-indicator .no-timing {
+    color: var(--text-muted);
+    font-size: 10px;
+    opacity: 0.5;
+  }
+
+  .old-thinking {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 13px;
+    padding: 8px 0;
+  }
+  .old-missing-info {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 11px;
+    padding: 2px 0;
+    opacity: 0.6;
+  }
+
+  .kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-family: monospace;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    color: var(--text-muted);
+  }
+
+  /* V4.4: Highlighted error field in args */
+  .error-field { color: var(--error); font-weight: 600; }
+
+  /* New step appear animation */
+  @keyframes slideInStep {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .tool-step { animation: slideInStep 0.15s ease-out; }
+
+  /* Responsive: narrow screens */
+  @media (max-width: 600px) {
+    .comparison { flex-direction: column; }
+    .tool-args-inline { max-width: 120px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="title">Claude Chat</span>
+  <span class="status">* Connected</span>
+  <span class="session-id">a1b2c3d4</span>
+  <span class="extensions">19 extensions</span>
+</div>
+
+<div class="mockup-tabs">
+  <button class="mockup-tab active" onclick="showView('comparison')">Before / After</button>
+  <button class="mockup-tab" onclick="showView('executing')">Executing</button>
+  <button class="mockup-tab" onclick="showView('completed')">Completed + Expand</button>
+  <button class="mockup-tab" onclick="showView('error')">Error State</button>
+  <button class="mockup-tab" onclick="showView('cancelled')">Cancelled</button>
+  <button class="mockup-tab" onclick="showView('many')">Many Steps (10+)</button>
+</div>
+
+<!-- ============================================= -->
+<!-- VIEW 1: Before / After Comparison             -->
+<!-- ============================================= -->
+<div class="view active" id="view-comparison">
+  <div class="mockup-label">SIDE-BY-SIDE: CURRENT UI vs PROPOSED UI</div>
+  <div class="comparison">
+    <div class="comparison-panel">
+      <div class="comparison-label old">CURRENT (Purple Pills Only)</div>
+      <div class="comparison-content">
+        <div class="message user">use npm-review skill to evaluate xlsx</div>
+        <div class="message assistant">
+          <div>
+            <div class="old-tool-indicator">Bash <span class="no-timing">?</span></div>
+            <div class="old-tool-indicator">WebFetch <span class="no-timing">?</span></div>
+            <div class="old-tool-indicator">Bash <span class="no-timing">?</span></div>
+          </div>
+          <div class="old-missing-info">(no arguments, no results, no timing)</div>
+I'll evaluate the xlsx npm package. Let me review it...
+
+## NPM Package Review Summary
+
+| Criteria | Score |
+|----------|-------|
+| Security | 7/10 |
+| License  | Apache-2.0 |
+| Verdict  | APPROVED |
+        </div>
+        <div class="old-thinking">Thinking...</div>
+      </div>
+    </div>
+
+    <div class="comparison-panel">
+      <div class="comparison-label new">PROPOSED (Progressive Depth)</div>
+      <div class="comparison-content">
+        <div class="message user">use npm-review skill to evaluate xlsx</div>
+        <div class="message assistant">
+          <div class="tool-steps">
+            <div class="tool-step">
+              <div class="tool-step-header" tabindex="0">
+                <span class="expand-hint"></span>
+                <span class="step-marker" data-status="completed">&#9679;</span>
+                <span class="tool-name">Bash</span><span class="tool-paren">(</span><span class="tool-args-inline">npm view xlsx version description license homepage</span><span class="tool-paren-close">)</span>
+                <span class="tool-timing">0.4s</span>
+              </div>
+              <!-- V1.2: First step shows result preview -->
+              <div class="result-preview">
+                <span class="result-connector">&#9119;</span>
+                <span class="result-preview-text">xlsx@0.18.5 - Apache-2.0</span>
+              </div>
+            </div>
+            <div class="tool-step">
+              <div class="tool-step-header" tabindex="0">
+                <span class="expand-hint"></span>
+                <span class="step-marker" data-status="completed">&#9679;</span>
+                <span class="tool-name">WebFetch</span><span class="tool-paren">(</span><span class="tool-args-inline">https://snyk.io/advisor/npm-package/xlsx</span><span class="tool-paren-close">)</span>
+                <span class="tool-timing">1.2s</span>
+              </div>
+            </div>
+            <div class="tool-step">
+              <div class="tool-step-header" tabindex="0">
+                <span class="expand-hint"></span>
+                <span class="step-marker" data-status="completed">&#9679;</span>
+                <span class="tool-name">Bash</span><span class="tool-paren">(</span><span class="tool-args-inline">npm audit xlsx --json 2>/dev/null | head -50</span><span class="tool-paren-close">)</span>
+                <span class="tool-timing">0.8s</span>
+              </div>
+            </div>
+          </div>
+I'll evaluate the xlsx npm package...
+
+## NPM Package Review Summary
+
+| Criteria | Score |
+|----------|-------|
+| Security | 7/10 |
+| License  | Apache-2.0 |
+| Verdict  | APPROVED |
+        </div>
+        <div class="completion-meta">3 steps | 2.4s | 1.2K in / 890 out | $0.0012</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- VIEW 2: Executing State                       -->
+<!-- ============================================= -->
+<div class="view" id="view-executing">
+  <div class="mockup-label">EXECUTING STATE - CLI-style markers, spinner on active step, live elapsed counter</div>
+  <div class="messages">
+    <div class="message user">use npm-review skill to evaluate xlsx</div>
+    <div class="message assistant">
+      <div class="thinking-indicator">
+        <span class="thinking-dots"><span></span><span></span><span></span></span>
+        <span>Thinking...</span>
+      </div>
+      <div class="tool-steps">
+        <div class="tool-step">
+          <div class="tool-step-header" tabindex="0">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">Bash</span><span class="tool-paren">(</span><span class="tool-args-inline">npm view xlsx version description license homepage</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">0.4s</span>
+          </div>
+        </div>
+        <div class="tool-step">
+          <div class="tool-step-header" tabindex="0">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">WebFetch</span><span class="tool-paren">(</span><span class="tool-args-inline">https://snyk.io/advisor/npm-package/xlsx</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">1.2s</span>
+          </div>
+        </div>
+        <div class="tool-step">
+          <div class="tool-step-header running-row">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="running"><div class="spinner"></div></span>
+            <span class="tool-name">Bash</span><span class="tool-paren">(</span><span class="tool-args-inline">npm audit xlsx --json 2>/dev/null | head -50</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing" id="elapsed-counter">0.0s</span>
+          </div>
+        </div>
+      </div>
+I'll evaluate the xlsx npm package. Let me check the security advisories...
+    </div>
+    <div class="streaming-footer">Step 3 | 1.8s elapsed</div>
+  </div>
+  <div class="input-area">
+    <textarea disabled placeholder="Claude is working... press Esc or click Stop to cancel"></textarea>
+    <button class="btn-send stop">&#9632; Stop (Esc)</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- VIEW 3: Completed + Expanded                  -->
+<!-- ============================================= -->
+<div class="view" id="view-completed">
+  <div class="mockup-label">COMPLETED - Click any step to expand. First step shows result preview by default.</div>
+  <div class="messages">
+    <div class="message user">use npm-review skill to evaluate xlsx</div>
+    <div class="message assistant">
+      <div class="tool-steps">
+        <div class="tool-step">
+          <div class="tool-step-header" onclick="toggleDetail(this)" tabindex="0">
+            <span class="expand-hint">&#9656;</span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">Bash</span><span class="tool-paren">(</span><span class="tool-args-inline">npm view xlsx version description license homepage</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">0.4s</span>
+          </div>
+          <!-- V3.1 / G4: Result preview for first step -->
+          <div class="result-preview">
+            <span class="result-connector">&#9119;</span>
+            <span class="result-preview-text">xlsx@0.18.5 - Apache-2.0</span>
+          </div>
+          <div class="tool-step-detail" data-status="completed">
+            <div class="detail-label">Output <span style="color:var(--text-muted); font-weight:400; font-size:10px">(186 chars)</span></div>
+            <div class="detail-content">xlsx@0.18.5
+'SheetJS Spreadsheet data parser and writer'
+Apache-2.0
+https://sheetjs.com/</div>
+          </div>
+        </div>
+        <div class="tool-step">
+          <div class="tool-step-header" onclick="toggleDetail(this)" tabindex="0">
+            <span class="expand-hint">&#9656;</span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">WebFetch</span><span class="tool-paren">(</span><span class="tool-args-inline">https://snyk.io/advisor/npm-package/xlsx</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">1.2s</span>
+          </div>
+          <div class="tool-step-detail visible" data-status="completed">
+            <div class="detail-label">Full arguments</div>
+            <div class="detail-content">{ "url": "https://snyk.io/advisor/npm-package/xlsx",
+  "prompt": "Extract package health score, security, popularity, maintenance" }</div>
+            <div class="detail-label">Output <span style="color:var(--text-muted); font-weight:400; font-size:10px">(2.1 KB)</span></div>
+            <div class="detail-content-wrap has-overflow">
+              <div class="detail-content">Package Health Score: 71/100
+Security: No known vulnerabilities
+Popularity: 4,893,027 weekly downloads (Top 1%)
+Maintenance: Active - last commit 3 months ago
+Community: 36,142 GitHub stars
+License: Apache-2.0 (permissive)
+Dependencies: 0 direct dependencies
+...</div>
+            </div>
+            <button class="show-full">Show full result (2.1 KB)</button>
+          </div>
+        </div>
+        <div class="tool-step">
+          <div class="tool-step-header" onclick="toggleDetail(this)" tabindex="0">
+            <span class="expand-hint">&#9656;</span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">Bash</span><span class="tool-paren">(</span><span class="tool-args-inline">npm audit xlsx --json 2>/dev/null | head -50</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">0.8s</span>
+          </div>
+          <div class="tool-step-detail" data-status="completed">
+            <div class="detail-label">Output <span style="color:var(--text-muted); font-weight:400; font-size:10px">(94 chars)</span></div>
+            <div class="detail-content">found 0 vulnerabilities</div>
+          </div>
+        </div>
+      </div>
+## NPM Package Review Summary
+
+| Package | Score | License | Security | Maintenance | ACTION |
+|---------|-------|---------|----------|-------------|--------|
+| xlsx | 88/100 | Apache-2.0 | Pass | Active | APPROVED |
+
+### Recommendation
+Approved for installation. Industry-standard library for spreadsheet operations.
+    </div>
+    <div class="completion-meta">3 steps | 2.4s | 1.2K in / 890 out | $0.0012</div>
+  </div>
+  <div class="input-area">
+    <textarea placeholder="Type a message..."></textarea>
+    <button class="btn-send send">Send</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- VIEW 4: Error State                           -->
+<!-- ============================================= -->
+<div class="view" id="view-error">
+  <div class="mockup-label">ERROR STATE - Failed step red-highlighted with FAILED badge, error auto-expanded, retry annotated</div>
+  <div class="messages">
+    <div class="message user">create a GitHub issue for the login bug</div>
+    <div class="message assistant">
+      <div class="tool-steps">
+        <div class="tool-step">
+          <div class="tool-step-header" onclick="toggleDetail(this)" tabindex="0">
+            <span class="expand-hint">&#9656;</span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">github > list_repos</span><span class="tool-paren">(</span><span class="tool-args-inline">owner: "acme"</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">0.6s</span>
+          </div>
+          <div class="tool-step-detail" data-status="completed">
+            <div class="detail-label">Output <span style="color:var(--text-muted); font-weight:400; font-size:10px">(412 chars)</span></div>
+            <div class="detail-content">["acme/web-app", "acme/api-server", "acme/mobile-app"]</div>
+          </div>
+        </div>
+        <div class="tool-step">
+          <div class="tool-step-header error-row" onclick="toggleDetail(this)" tabindex="0">
+            <span class="expand-hint">&#9656;</span>
+            <span class="step-marker" data-status="error">&#9679;</span>
+            <span class="tool-name" style="color: var(--error)">github > create_issue</span><span class="tool-paren" style="color: rgba(239,68,68,0.6)">(</span><span class="tool-args-inline" style="color: rgba(239,68,68,0.6)">repo: "acme/web-app", title: "", body: "Login fails w...</span><span class="tool-paren-close" style="color: rgba(239,68,68,0.6)">)</span>
+            <span class="tool-timing">0.3s</span>
+            <span class="error-badge">FAILED</span>
+          </div>
+          <div class="tool-step-detail visible" data-status="error">
+            <div class="detail-label">Full arguments</div>
+            <div class="detail-content">{ "repo": "acme/web-app", <span class="error-field">"title": ""</span>, "body": "Login fails with 401 on expired sessions" }</div>
+            <div class="detail-label">Error</div>
+            <div class="detail-content error-content">&#10007; Validation Failed: "title" field is required.
+Resource: Issue
+Code: missing_field</div>
+            <button class="copy-error-btn" onclick="copyError(this)">Copy error</button>
+          </div>
+        </div>
+        <div class="retry-annotation">&#8627; retried</div>
+        <div class="tool-step">
+          <div class="tool-step-header" onclick="toggleDetail(this)" tabindex="0">
+            <span class="expand-hint">&#9656;</span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">github > create_issue</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", title: "Login auth bypass on expired..."</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">0.5s</span>
+          </div>
+          <div class="tool-step-detail" data-status="completed">
+            <div class="detail-label">Output <span style="color:var(--text-muted); font-weight:400; font-size:10px">(156 chars)</span></div>
+            <div class="detail-content">Created issue #247: "Login authentication bypass on expired sessions"
+URL: https://github.com/acme/web-app/issues/247</div>
+          </div>
+        </div>
+      </div>
+I encountered a validation error on the first attempt (missing title), but I corrected it and successfully created the issue.
+
+Issue #247: "Login authentication bypass on expired sessions" has been created in acme/web-app.
+    </div>
+    <div class="completion-meta">4 steps | 3.1s | 1.8K in / 1.1K out | $0.0018</div>
+  </div>
+  <div class="input-area">
+    <textarea placeholder="Type a message..."></textarea>
+    <button class="btn-send send">Send</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- VIEW 5: Cancelled State                       -->
+<!-- ============================================= -->
+<div class="view" id="view-cancelled">
+  <div class="mockup-label">CANCELLED - User pressed Stop/Escape. Cancelled step amber with strikethrough args, partial text preserved.</div>
+  <div class="messages">
+    <div class="message user">analyze all open issues and categorize them by severity</div>
+    <div class="message assistant">
+      <div class="tool-steps">
+        <div class="tool-step">
+          <div class="tool-step-header" tabindex="0">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">github > list_issues</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", state: "open", per_page: 100</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">0.9s</span>
+          </div>
+        </div>
+        <div class="tool-step">
+          <div class="tool-step-header" tabindex="0">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">github > get_issue</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", issue_number: 234</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">0.3s</span>
+          </div>
+        </div>
+        <div class="tool-step">
+          <div class="tool-step-header" tabindex="0" style="opacity: 0.6;">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="cancelled">&#9679;</span>
+            <span class="tool-name" style="color: var(--warning)">github > get_issue</span><span class="tool-paren" style="color: rgba(245,158,11,0.6)">(</span><span class="tool-args-inline" style="color: rgba(245,158,11,0.5); text-decoration: line-through;">repo: "acme/web-app", issue_number: 201</span><span class="tool-paren-close" style="color: rgba(245,158,11,0.6)">)</span>
+            <span class="tool-timing" style="color: var(--warning)">&ndash;</span>
+          </div>
+        </div>
+      </div>
+<div class="truncated-content">I found 23 open issues. Let me categorize them by severity. So far I've reviewed 2 of 23:
+
+**Critical (1)**
+- #234: Authentication bypass in login flow
+
+**High (1)**
+- #201: Memory leak in dashboard component
+</div>
+      <div class="interrupted-bar">&#9888; Response interrupted by user</div>
+    </div>
+    <div class="completion-meta interrupted">Interrupted | 2 steps completed | 1.8s</div>
+  </div>
+  <div class="input-area">
+    <textarea placeholder="Continue analysis, start new task, or ask about partial results..."></textarea>
+    <button class="btn-send send">Send</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- VIEW 6: Many Steps (Auto-collapse)            -->
+<!-- ============================================= -->
+<div class="view" id="view-many">
+  <div class="mockup-label">MANY STEPS (10+) - Auto-collapse after 5 steps. 2 most recent + active always visible.</div>
+  <div class="messages">
+    <div class="message user">review all 8 PRs pending review and summarize</div>
+    <div class="message assistant">
+      <div class="tool-steps">
+        <div class="collapsed-summary" id="collapse-toggle" onclick="toggleCollapsed()">
+          <span class="collapse-icon">&#9656;</span>
+          <span class="step-marker" data-status="completed">&#9679;</span>
+          <span>5 steps: list_pulls, get_pull &#215;4</span>
+          <span class="tool-timing">2.3s</span>
+        </div>
+
+        <div class="expanded-steps-wrap" id="expanded-steps">
+          <div class="tool-step">
+            <div class="tool-step-header" tabindex="0">
+              <span class="expand-hint"></span>
+              <span class="step-marker" data-status="completed">&#9679;</span>
+              <span class="tool-name">github > list_pulls</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", state: "open"</span><span class="tool-paren-close">)</span>
+              <span class="tool-timing">0.5s</span>
+            </div>
+          </div>
+          <div class="tool-step">
+            <div class="tool-step-header" tabindex="0">
+              <span class="expand-hint"></span>
+              <span class="step-marker" data-status="completed">&#9679;</span>
+              <span class="tool-name">github > get_pull</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", pull_number: 142</span><span class="tool-paren-close">)</span>
+              <span class="tool-timing">0.4s</span>
+            </div>
+          </div>
+          <div class="tool-step">
+            <div class="tool-step-header" tabindex="0">
+              <span class="expand-hint"></span>
+              <span class="step-marker" data-status="completed">&#9679;</span>
+              <span class="tool-name">github > get_pull</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", pull_number: 139</span><span class="tool-paren-close">)</span>
+              <span class="tool-timing">0.3s</span>
+            </div>
+          </div>
+          <div class="tool-step">
+            <div class="tool-step-header" tabindex="0">
+              <span class="expand-hint"></span>
+              <span class="step-marker" data-status="completed">&#9679;</span>
+              <span class="tool-name">github > get_pull</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", pull_number: 137</span><span class="tool-paren-close">)</span>
+              <span class="tool-timing">0.5s</span>
+            </div>
+          </div>
+          <div class="tool-step">
+            <div class="tool-step-header" tabindex="0">
+              <span class="expand-hint"></span>
+              <span class="step-marker" data-status="completed">&#9679;</span>
+              <span class="tool-name">github > get_pull</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", pull_number: 135</span><span class="tool-paren-close">)</span>
+              <span class="tool-timing">0.6s</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- V6.3: 2 most recent completed steps always visible -->
+        <div class="tool-step">
+          <div class="tool-step-header" tabindex="0">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">github > list_reviews</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", pull_number: 142</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">0.9s</span>
+          </div>
+        </div>
+        <div class="tool-step">
+          <div class="tool-step-header" tabindex="0">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="completed">&#9679;</span>
+            <span class="tool-name">github > list_reviews</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", pull_number: 139</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing">1.0s</span>
+          </div>
+        </div>
+
+        <!-- V6.4: Running step always visible -->
+        <div class="tool-step">
+          <div class="tool-step-header running-row">
+            <span class="expand-hint"></span>
+            <span class="step-marker" data-status="running"><div class="spinner"></div></span>
+            <span class="tool-name">github > get_pull</span><span class="tool-paren">(</span><span class="tool-args-inline">repo: "acme/web-app", pull_number: 134</span><span class="tool-paren-close">)</span>
+            <span class="tool-timing" id="elapsed-counter-many">0.0s</span>
+          </div>
+        </div>
+      </div>
+I'm reviewing 8 pending PRs. I've analyzed 5 so far:
+
+**PR #142** - Add user avatar upload (Ready to merge, 2 approvals)
+**PR #139** - Fix pagination in search results (Needs 1 more review)
+**PR #137** - Update CI pipeline for Node 20 (Has merge conflicts)
+**PR #135** - Add rate limiting middleware (Changes requested)
+**PR #134** - Refactor auth token validation (Ready to merge)
+
+Reviewing remaining 3...
+    </div>
+    <div class="streaming-footer">Step 8 (5 collapsed) | 4.8s elapsed</div>
+  </div>
+  <div class="input-area">
+    <textarea disabled placeholder="Claude is working... press Esc or click Stop to cancel"></textarea>
+    <button class="btn-send stop">&#9632; Stop (Esc)</button>
+  </div>
+</div>
+
+<script>
+function showView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.mockup-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function toggleDetail(header) {
+  const detail = header.nextElementSibling;
+  // Skip result-preview elements to find the detail panel
+  let target = header.nextElementSibling;
+  while (target && !target.classList.contains('tool-step-detail')) {
+    target = target.nextElementSibling;
+  }
+  if (target && target.classList.contains('tool-step-detail')) {
+    target.classList.toggle('visible');
+    // Update expand hint
+    const hint = header.querySelector('.expand-hint');
+    if (hint) {
+      hint.textContent = target.classList.contains('visible') ? '\u25BE' : '\u25B8';
+    }
+  }
+}
+
+// V6.2: Toggle collapsed steps with animation
+function toggleCollapsed() {
+  const toggle = document.getElementById('collapse-toggle');
+  const steps = document.getElementById('expanded-steps');
+  toggle.classList.toggle('expanded');
+  steps.classList.toggle('visible');
+}
+
+// V2.2: Live elapsed counter for running steps
+let elapsedTime = 0;
+let elapsedTimeMany = 0;
+function updateElapsedCounters() {
+  const counter = document.getElementById('elapsed-counter');
+  const counterMany = document.getElementById('elapsed-counter-many');
+  if (counter && document.getElementById('view-executing').classList.contains('active')) {
+    elapsedTime += 0.1;
+    counter.textContent = elapsedTime.toFixed(1) + 's';
+  }
+  if (counterMany && document.getElementById('view-many').classList.contains('active')) {
+    elapsedTimeMany += 0.1;
+    counterMany.textContent = elapsedTimeMany.toFixed(1) + 's';
+  }
+}
+setInterval(updateElapsedCounters, 100);
+
+// V4.2: Copy error to clipboard
+function copyError(btn) {
+  const errorContent = btn.previousElementSibling;
+  if (errorContent) {
+    const text = errorContent.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const original = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    });
+  }
+}
+
+// Keyboard accessibility: Enter/Space to expand/collapse
+document.addEventListener('keydown', function(e) {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('tool-step-header')) {
+    e.preventDefault();
+    if (e.target.onclick) {
+      e.target.onclick();
+    } else {
+      toggleDetail(e.target);
+    }
+  }
+});
+</script>
+
+</body>
+</html>

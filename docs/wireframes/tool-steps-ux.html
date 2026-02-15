@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tool Steps UX — Current vs Proposed</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-card: #0f3460;
+    --text: #e0e0e0;
+    --text-muted: #8899aa;
+    --accent: #a855f7;
+    --accent-dim: #7c3aed33;
+    --green: #22c55e;
+    --red: #ef4444;
+    --orange: #f59e0b;
+    --border: #334155;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    line-height: 1.5;
+  }
+
+  h1 {
+    text-align: center;
+    margin-bottom: 8px;
+    font-size: 24px;
+    color: var(--accent);
+  }
+
+  .subtitle {
+    text-align: center;
+    color: var(--text-muted);
+    margin-bottom: 32px;
+    font-size: 14px;
+  }
+
+  .section {
+    max-width: 700px;
+    margin: 0 auto 48px;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .section-number {
+    background: var(--accent);
+    color: white;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .section-desc {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-bottom: 16px;
+    padding-left: 44px;
+  }
+
+  .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    padding-left: 4px;
+  }
+
+  .label.bad { color: var(--red); }
+  .label.good { color: var(--green); }
+
+  /* Chat mockup frame */
+  .chat-frame {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .user-msg {
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    max-width: 80%;
+    margin-left: auto;
+  }
+
+  .assistant-area {
+    padding: 4px 0;
+  }
+
+  /* ===== CURRENT STATE: Purple pills ===== */
+  .pill {
+    display: inline-block;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    margin: 2px 4px 2px 0;
+  }
+
+  .assistant-text {
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  .thinking {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+
+  /* ===== DECISION 1: Tool Step rows ===== */
+  .tool-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.15s;
+    user-select: none;
+  }
+
+  .tool-step:hover {
+    background: rgba(255,255,255,0.04);
+  }
+
+  .tool-step .chevron {
+    color: var(--text-muted);
+    font-size: 10px;
+    width: 14px;
+    text-align: center;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  .tool-step.expanded .chevron {
+    transform: rotate(90deg);
+  }
+
+  .tool-step .status-icon {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  .status-icon.completed { color: var(--green); }
+  .status-icon.running { color: var(--orange); }
+  .status-icon.error { color: var(--red); }
+  .status-icon.cancelled { color: var(--text-muted); }
+
+  .tool-step .tool-name {
+    flex: 1;
+    color: var(--text);
+  }
+
+  .tool-step .tool-name .server {
+    color: var(--text-muted);
+  }
+
+  .tool-step .timing {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  /* Spinner animation */
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--orange);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  /* Expanded detail panel */
+  .tool-detail {
+    margin-left: 40px;
+    border-left: 2px solid var(--accent);
+    background: rgba(168, 85, 247, 0.05);
+    padding: 10px 14px;
+    margin-bottom: 4px;
+    border-radius: 0 8px 8px 0;
+    font-size: 12px;
+    display: none;
+  }
+
+  .tool-detail.visible {
+    display: block;
+  }
+
+  .detail-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+
+  .detail-args {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: var(--text);
+    background: rgba(0,0,0,0.3);
+    padding: 8px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    white-space: pre-wrap;
+  }
+
+  .detail-result {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.5;
+  }
+
+  .detail-result .char-count {
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .show-full {
+    color: var(--accent);
+    font-size: 11px;
+    cursor: pointer;
+    margin-top: 4px;
+    display: inline-block;
+  }
+
+  .error-detail {
+    color: var(--red);
+    font-size: 12px;
+    margin-left: 40px;
+    padding: 6px 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 2px solid var(--red);
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 4px;
+  }
+
+  /* ===== DECISION 4: Auto-collapse summary ===== */
+  .collapsed-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-muted);
+    transition: background 0.15s;
+  }
+
+  .collapsed-summary:hover {
+    background: rgba(255,255,255,0.04);
+  }
+
+  .collapsed-summary .count-badge {
+    background: var(--green);
+    color: white;
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  /* ===== DECISION 2: Completion Meta Bar ===== */
+  .meta-bar {
+    text-align: center;
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text-muted);
+    padding: 8px 0;
+    margin-top: 8px;
+    opacity: 0.7;
+  }
+
+  .meta-bar.interrupted {
+    color: var(--orange);
+  }
+
+  /* Comparison arrow */
+  .comparison-arrow {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 24px;
+    margin: 8px 0;
+  }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px auto;
+    max-width: 700px;
+  }
+
+  /* Interactive hint */
+  .hint {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    font-style: italic;
+  }
+
+  /* Input area mockup */
+  .input-mockup {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 12px 12px;
+    margin: -16px -16px -16px;
+    margin-top: 12px;
+  }
+
+  .input-mockup input {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .input-mockup .btn {
+    padding: 8px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 80px;
+  }
+
+  .btn-send {
+    background: var(--accent);
+    color: white;
+  }
+
+  .btn-stop {
+    background: var(--red);
+    color: white;
+  }
+
+  .btn-send-disabled {
+    background: var(--border);
+    color: var(--text-muted);
+  }
+
+  /* Annotation callouts */
+  .callout {
+    background: rgba(168, 85, 247, 0.1);
+    border: 1px dashed var(--accent);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 8px 0;
+  }
+
+  .callout strong {
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<h1>Tool Steps UX — Wireframes</h1>
+<p class="subtitle">Current state vs. proposed design for decisions #1, #2, and #4</p>
+
+<!-- ==================== CURRENT STATE ==================== -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-number" style="background: var(--red);">!</div>
+    <div class="section-title">Current State — What You See Today</div>
+  </div>
+  <p class="section-desc">
+    Tool calls appear as flat purple pills. No arguments, no results, no timing, no progress, no way to cancel.
+  </p>
+
+  <div class="chat-frame">
+    <div class="user-msg">Review the open issues in acme/web-app and summarize the top priorities</div>
+    <div class="assistant-area">
+      <div>
+        <span class="pill">github > list_issues</span>
+        <span class="pill">github > get_issue</span>
+        <span class="pill">github > get_issue</span>
+        <span class="pill">github > get_issue</span>
+      </div>
+      <div class="assistant-text">
+        There are 12 open issues. The top 3 priorities are...
+      </div>
+    </div>
+    <div class="input-mockup">
+      <input placeholder="Type a message..." disabled />
+      <button class="btn btn-send-disabled">...</button>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>Problems:</strong> You can't see what arguments were passed to each tool. You can't see what came back.
+    You don't know how long anything took. You can't cancel if it's stuck. You don't know the cost.
+  </div>
+</div>
+
+<div class="comparison-arrow">↓ ↓ ↓</div>
+
+<!-- ==================== DECISION 1: Progressive Disclosure ==================== -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-number">1</div>
+    <div class="section-title">Decision #1 — Progressive Disclosure (3 Levels)</div>
+  </div>
+  <p class="section-desc">
+    Each tool call becomes a full row with status icon and timing.
+    Click to expand arguments + results. Never overwhelming by default.
+  </p>
+
+  <p class="label good">Level 0 — Always visible (collapsed)</p>
+  <div class="chat-frame">
+    <div class="user-msg">Review the open issues in acme/web-app</div>
+    <div class="assistant-area">
+      <div class="tool-step" onclick="toggleDetail(this)">
+        <span class="chevron">&#9654;</span>
+        <span class="status-icon completed">&#10003;</span>
+        <span class="tool-name"><span class="server">github &gt;</span> list_issues</span>
+        <span class="timing">0.8s</span>
+      </div>
+      <div class="tool-detail" id="detail-1">
+        <div class="detail-label">Arguments:</div>
+        <div class="detail-args">{ "repo": "acme/web-app", "state": "open" }</div>
+        <div class="detail-label">Result: <span class="char-count">(324 chars)</span></div>
+        <div class="detail-result">
+          Found 12 issues. Top 3 by priority:<br>
+          1. #234 — Authentication bypass in login<br>
+          2. #198 — Performance regression on dashboard<br>
+          3. #187 — Missing validation on upload...<br>
+          <span class="show-full">[Show full result]</span>
+        </div>
+      </div>
+
+      <div class="tool-step" onclick="toggleDetail(this)">
+        <span class="chevron">&#9654;</span>
+        <span class="status-icon completed">&#10003;</span>
+        <span class="tool-name"><span class="server">github &gt;</span> get_issue</span>
+        <span class="timing">0.3s</span>
+      </div>
+
+      <div class="tool-step" onclick="toggleDetail(this)">
+        <span class="chevron">&#9654;</span>
+        <span class="status-icon completed">&#10003;</span>
+        <span class="tool-name"><span class="server">github &gt;</span> get_issue</span>
+        <span class="timing">0.4s</span>
+      </div>
+
+      <div class="assistant-text">
+        There are 12 open issues. The top 3 priorities are:<br><br>
+        1. <strong>#234 — Authentication bypass</strong> (Critical)...<br>
+        2. <strong>#198 — Performance regression</strong> (High)...<br>
+        3. <strong>#187 — Missing validation</strong> (Medium)...
+      </div>
+
+      <div class="meta-bar">3 turns &nbsp;|&nbsp; 2.4s &nbsp;|&nbsp; $0.0012</div>
+    </div>
+  </div>
+  <p class="hint">&#9650; Click any row to expand — try it!</p>
+
+  <br>
+  <p class="label good">Running state — with Stop button</p>
+  <div class="chat-frame">
+    <div class="user-msg">Analyze all repos in our org</div>
+    <div class="assistant-area">
+      <div class="tool-step">
+        <span class="chevron">&#9654;</span>
+        <span class="status-icon completed">&#10003;</span>
+        <span class="tool-name"><span class="server">github &gt;</span> list_repos</span>
+        <span class="timing">1.2s</span>
+      </div>
+      <div class="tool-step">
+        <span class="chevron" style="visibility:hidden">&#9654;</span>
+        <span class="status-icon running"><div class="spinner"></div></span>
+        <span class="tool-name"><span class="server">github &gt;</span> get_repo_stats</span>
+        <span class="timing" style="color: var(--orange);">...</span>
+      </div>
+    </div>
+    <div class="input-mockup">
+      <input placeholder="Type a message..." disabled />
+      <button class="btn btn-stop">Stop</button>
+    </div>
+  </div>
+  <div class="callout">
+    <strong>Stop button:</strong> Replaces "Send" while streaming. Click it (or press Escape)
+    to cancel. Partial text is preserved with "[Response interrupted]" label.
+  </div>
+
+  <br>
+  <p class="label bad">Error state — auto-expanded</p>
+  <div class="chat-frame">
+    <div class="assistant-area">
+      <div class="tool-step">
+        <span class="chevron">&#9654;</span>
+        <span class="status-icon completed">&#10003;</span>
+        <span class="tool-name"><span class="server">github &gt;</span> list_issues</span>
+        <span class="timing">0.8s</span>
+      </div>
+      <div class="tool-step">
+        <span class="chevron" style="visibility:hidden">&#9654;</span>
+        <span class="status-icon error">&#10007;</span>
+        <span class="tool-name"><span class="server">github &gt;</span> create_issue</span>
+        <span class="timing">0.4s</span>
+      </div>
+      <div class="error-detail">
+        Error: Validation failed: "title" is required
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ==================== DECISION 2: Data that makes it possible ==================== -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-number">2</div>
+    <div class="section-title">Decision #2 — What Data Flows (Backend → Frontend)</div>
+  </div>
+  <p class="section-desc">
+    This is the backend change that makes Decision #1 possible. Today the backend
+    <em>discards</em> tool results and metadata. The proposed change sends them through.
+  </p>
+
+  <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+    <!-- Before -->
+    <div style="flex: 1; min-width: 280px;">
+      <p class="label bad">Today — data discarded</p>
+      <div class="chat-frame" style="font-family: 'SF Mono', monospace; font-size: 11px; line-height: 1.8;">
+        <div style="color: var(--text-muted);">SSE stream chunks:</div>
+        <br>
+        <div>delta: { tool_calls: [{ name: "list_issues" }] }</div>
+        <div style="color: var(--red); text-decoration: line-through;">tool_result → <em>suppressed</em></div>
+        <div>delta: { content: "There are 12..." }</div>
+        <div style="color: var(--red); text-decoration: line-through;">ResultMessage → <em>logged only</em></div>
+        <div>[DONE]</div>
+      </div>
+    </div>
+
+    <!-- After -->
+    <div style="flex: 1; min-width: 280px;">
+      <p class="label good">Proposed — data forwarded</p>
+      <div class="chat-frame" style="font-family: 'SF Mono', monospace; font-size: 11px; line-height: 1.8;">
+        <div style="color: var(--text-muted);">SSE stream chunks:</div>
+        <br>
+        <div>delta: { tool_calls: [{ name: "list_issues" <span style="color: var(--green);">, args: {...}</span> }] }</div>
+        <div style="color: var(--green);">delta: { tool_result: { id: "...", content: "Found 12...", is_error: false } }</div>
+        <div>delta: { content: "There are 12..." }</div>
+        <div style="color: var(--green);">meta: { turns: 3, cost: 0.0012, duration_ms: 2400 }</div>
+        <div>[DONE]</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout" style="margin-top: 16px;">
+    <strong>Why this matters to you:</strong> Without decision #2, the frontend has nothing to show.
+    The green lines are the new data that powers the expanded tool details, timing, error messages,
+    and the "3 turns | 2.4s | $0.0012" bar at the bottom.
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ==================== DECISION 4: Auto-collapse ==================== -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-number">4</div>
+    <div class="section-title">Decision #4 — Auto-Collapse (5+ Completed Steps)</div>
+  </div>
+  <p class="section-desc">
+    When an agent runs many tools (common with /npm-review or code analysis), showing every step
+    clutters the view. After 5 completed steps, they collapse into a summary row.
+  </p>
+
+  <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+    <!-- Without auto-collapse -->
+    <div style="flex: 1; min-width: 280px;">
+      <p class="label bad">Without auto-collapse (12 steps)</p>
+      <div class="chat-frame">
+        <div class="assistant-area">
+          <div class="tool-step" style="padding: 4px 12px;">
+            <span class="chevron">&#9654;</span>
+            <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+            <span class="tool-name" style="font-size:12px;"><span class="server">npm &gt;</span> fetch_package</span>
+            <span class="timing" style="font-size:11px;">0.3s</span>
+          </div>
+          <div class="tool-step" style="padding: 4px 12px;">
+            <span class="chevron">&#9654;</span>
+            <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+            <span class="tool-name" style="font-size:12px;"><span class="server">npm &gt;</span> check_license</span>
+            <span class="timing" style="font-size:11px;">0.2s</span>
+          </div>
+          <div class="tool-step" style="padding: 4px 12px;">
+            <span class="chevron">&#9654;</span>
+            <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+            <span class="tool-name" style="font-size:12px;"><span class="server">npm &gt;</span> check_vulnerabilities</span>
+            <span class="timing" style="font-size:11px;">0.4s</span>
+          </div>
+          <div class="tool-step" style="padding: 4px 12px;">
+            <span class="chevron">&#9654;</span>
+            <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+            <span class="tool-name" style="font-size:12px;"><span class="server">npm &gt;</span> check_maintenance</span>
+            <span class="timing" style="font-size:11px;">0.3s</span>
+          </div>
+          <div class="tool-step" style="padding: 4px 12px;">
+            <span class="chevron">&#9654;</span>
+            <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+            <span class="tool-name" style="font-size:12px;"><span class="server">npm &gt;</span> check_downloads</span>
+            <span class="timing" style="font-size:11px;">0.2s</span>
+          </div>
+          <div class="tool-step" style="padding: 4px 12px;">
+            <span class="chevron">&#9654;</span>
+            <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+            <span class="tool-name" style="font-size:12px;"><span class="server">npm &gt;</span> check_types</span>
+            <span class="timing" style="font-size:11px;">0.2s</span>
+          </div>
+          <div class="tool-step" style="padding: 4px 12px;">
+            <span class="chevron">&#9654;</span>
+            <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+            <span class="tool-name" style="font-size:12px;"><span class="server">snyk &gt;</span> advisor_score</span>
+            <span class="timing" style="font-size:11px;">0.8s</span>
+          </div>
+          <div class="tool-step" style="padding: 4px 12px;">
+            <span class="chevron">&#9654;</span>
+            <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+            <span class="tool-name" style="font-size:12px;"><span class="server">snyk &gt;</span> vuln_report</span>
+            <span class="timing" style="font-size:11px;">1.1s</span>
+          </div>
+          <div style="text-align: center; color: var(--text-muted); font-size: 11px; padding: 4px;">... 4 more rows ...</div>
+          <div class="assistant-text" style="font-size: 12px; color: var(--text-muted);">
+            The package xlsx is APPROVED...
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- With auto-collapse -->
+    <div style="flex: 1; min-width: 280px;">
+      <p class="label good">With auto-collapse</p>
+      <div class="chat-frame">
+        <div class="assistant-area">
+          <div class="collapsed-summary" onclick="this.style.display='none'; document.getElementById('expanded-group').style.display='block';">
+            <span class="count-badge">&#10003; 10</span>
+            <span>10 completed steps</span>
+            <span class="timing">3.8s total</span>
+          </div>
+          <div id="expanded-group" style="display: none;">
+            <div class="tool-step" style="padding: 4px 12px;">
+              <span class="chevron">&#9654;</span>
+              <span class="status-icon completed" style="font-size:11px;">&#10003;</span>
+              <span class="tool-name" style="font-size:12px;"><span class="server">npm &gt;</span> fetch_package</span>
+              <span class="timing" style="font-size:11px;">0.3s</span>
+            </div>
+            <div style="text-align: center; color: var(--text-muted); font-size: 11px; padding: 4px;">... 9 more steps ...</div>
+          </div>
+
+          <div class="tool-step">
+            <span class="chevron" style="visibility:hidden">&#9654;</span>
+            <span class="status-icon running"><div class="spinner"></div></span>
+            <span class="tool-name"><span class="server">xlsx &gt;</span> generate_report</span>
+            <span class="timing" style="color: var(--orange);">...</span>
+          </div>
+
+          <div class="assistant-text" style="font-size: 12px; color: var(--text-muted);">
+            Generating final report...
+          </div>
+        </div>
+      </div>
+      <p class="hint">&#9650; Click the summary row to expand</p>
+    </div>
+  </div>
+
+  <div class="callout" style="margin-top: 16px;">
+    <strong>Rule:</strong> Running steps (spinner) and error steps (&#10007;) are <em>never</em> auto-collapsed —
+    only completed steps collapse. This ensures you always see what's actively happening and what went wrong.
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ==================== Summary flow ==================== -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-number" style="background: var(--green);">&#8721;</div>
+    <div class="section-title">Full Flow — Putting It Together</div>
+  </div>
+
+  <div class="chat-frame">
+    <div class="user-msg">/npm-review xlsx</div>
+    <div class="assistant-area">
+      <!-- Collapsed completed steps -->
+      <div class="collapsed-summary">
+        <span class="count-badge">&#10003; 8</span>
+        <span>8 completed steps</span>
+        <span class="timing">3.1s total</span>
+      </div>
+
+      <!-- Currently running -->
+      <div class="tool-step">
+        <span class="chevron" style="visibility:hidden">&#9654;</span>
+        <span class="status-icon running"><div class="spinner"></div></span>
+        <span class="tool-name"><span class="server">xlsx &gt;</span> create_spreadsheet</span>
+        <span class="timing" style="color: var(--orange);">...</span>
+      </div>
+
+      <div class="thinking">Generating the review spreadsheet...</div>
+    </div>
+    <div class="input-mockup">
+      <input placeholder="Type a message..." disabled />
+      <button class="btn btn-stop">Stop</button>
+    </div>
+  </div>
+
+  <div style="text-align: center; color: var(--text-muted); font-size: 20px; margin: 12px 0;">↓ completes ↓</div>
+
+  <div class="chat-frame">
+    <div class="user-msg">/npm-review xlsx</div>
+    <div class="assistant-area">
+      <div class="collapsed-summary">
+        <span class="count-badge">&#10003; 9</span>
+        <span>9 completed steps</span>
+        <span class="timing">4.2s total</span>
+      </div>
+
+      <div class="assistant-text">
+        <strong>npm Package Review: xlsx</strong><br><br>
+        Verdict: <span style="color: var(--green); font-weight: bold;">APPROVED</span><br><br>
+        The xlsx package scores 78/100 on Snyk Advisor...
+      </div>
+
+      <div class="meta-bar">3 turns &nbsp;|&nbsp; 4.2s &nbsp;|&nbsp; $0.0018</div>
+    </div>
+    <div class="input-mockup">
+      <input placeholder="Type a message..." />
+      <button class="btn btn-send">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function toggleDetail(el) {
+    const detail = el.nextElementSibling;
+    if (detail && detail.classList.contains('tool-detail')) {
+      el.classList.toggle('expanded');
+      detail.classList.toggle('visible');
+    }
+  }
+</script>
+
+</body>
+</html>

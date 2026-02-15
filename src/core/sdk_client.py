@@ -45,6 +45,22 @@ class SDKClient:
                     message.num_turns,
                     message.total_cost_usd,
                 )
+                usage = {}
+                if hasattr(message, "usage") and message.usage:
+                    if isinstance(message.usage, dict):
+                        usage = message.usage
+                    else:
+                        usage = {
+                            "input_tokens": getattr(message.usage, "input_tokens", 0),
+                            "output_tokens": getattr(message.usage, "output_tokens", 0),
+                        }
+                yield {
+                    "type": "result_metadata",
+                    "num_turns": message.num_turns,
+                    "total_cost_usd": message.total_cost_usd,
+                    "duration_ms": getattr(message, "duration_ms", 0) or 0,
+                    "usage": usage,
+                }
 
 
 def _content_block_to_event(block) -> dict[str, Any] | None:
@@ -54,11 +70,31 @@ def _content_block_to_event(block) -> dict[str, Any] | None:
     if isinstance(block, ToolUseBlock):
         return {
             "type": "tool_use",
+            "id": block.id,
             "name": block.name,
             "arguments": json.dumps(block.input),
         }
     if isinstance(block, ToolResultBlock):
-        return {"type": "tool_result"}
+        # Forward tool_use_id, content, and is_error for the frontend
+        content = ""
+        if block.content:
+            if isinstance(block.content, str):
+                content = block.content
+            elif isinstance(block.content, list):
+                # ContentBlock list — extract text parts
+                parts = []
+                for part in block.content:
+                    if hasattr(part, "text"):
+                        parts.append(part.text)
+                    elif isinstance(part, dict) and "text" in part:
+                        parts.append(part["text"])
+                content = "\n".join(parts)
+        return {
+            "type": "tool_result",
+            "tool_use_id": block.tool_use_id,
+            "content": content,
+            "is_error": getattr(block, "is_error", False) or False,
+        }
     return None
 
 

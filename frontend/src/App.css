@@ -168,7 +168,7 @@ body {
 }
 
 .message {
-  max-width: 80%;
+  max-width: 85%;
   padding: 10px 14px;
   border-radius: 12px;
   font-size: 14px;
@@ -187,6 +187,7 @@ body {
   align-self: flex-start;
   background: var(--bg-assistant-msg);
   border-bottom-left-radius: 4px;
+  max-width: 90%;
 }
 
 .message.error {
@@ -195,27 +196,401 @@ body {
   color: #fca5a5;
 }
 
-.thinking {
-  align-self: flex-start;
-  color: var(--text-muted);
-  font-style: italic;
-  font-size: 13px;
-  padding: 8px 14px;
+/* === TOOL STEPS (CLI-style, matching mockup v3) === */
+.tool-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 6px;
 }
 
-/* Tool indicators */
-.tool-indicator {
+.tool-step {
+  border-radius: 4px;
+  overflow: hidden;
+  animation: slideInStep 0.15s ease-out;
+}
+
+@keyframes slideInStep {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Step marker (filled circle) */
+.step-marker {
+  width: 10px;
+  height: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.step-marker[data-status="completed"] { color: var(--success); }
+.step-marker[data-status="running"] { color: var(--accent); }
+.step-marker[data-status="error"] { color: var(--error); }
+.step-marker[data-status="cancelled"] { color: var(--warning); }
+
+/* Expand hint arrow */
+.expand-hint {
+  width: 10px;
+  flex-shrink: 0;
+  font-size: 8px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.tool-step-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  transition: background 0.15s;
+  line-height: 1.4;
+  position: relative;
+}
+
+.tool-step-header:hover {
+  background: rgba(124, 58, 237, 0.08);
+}
+
+.tool-step-header:hover .expand-hint {
+  opacity: 0.4;
+}
+
+.tool-step-header[tabindex] { outline: none; }
+.tool-step-header:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Running step highlight */
+.tool-step-header.running-row {
+  background: rgba(124, 58, 237, 0.05);
+  border-left: 2px solid var(--accent);
+  padding-left: 6px;
+}
+
+/* Error step highlight */
+.tool-step-header.error-row {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+/* Spinner */
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(124, 58, 237, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Tool name + parenthesized args */
+.tool-name {
+  color: var(--text-primary);
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.tool-paren {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.tool-args-inline {
+  color: var(--text-muted);
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-paren-close {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.tool-timing {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-left: auto;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.tool-timing.pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* Error badge */
+.error-badge {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--error);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+}
+
+/* Result preview with CLI corner connector */
+.result-preview {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 2px 24px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.result-connector {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.result-preview-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Expanded detail panel */
+.tool-step-detail {
+  margin: 0 8px 2px 24px;
+  padding: 6px 10px;
+  background: rgba(15, 22, 41, 0.6);
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease-out, padding 0.2s ease-out;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.tool-step-detail[data-status="completed"] { border-left: 2px solid var(--success); }
+.tool-step-detail[data-status="error"] { border-left: 2px solid var(--error); }
+.tool-step-detail[data-status="cancelled"] { border-left: 2px solid var(--warning); }
+.tool-step-detail:not([data-status]) { border-left: 2px solid var(--accent); }
+
+.tool-step-detail.visible {
+  max-height: 400px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  overflow-y: auto;
+}
+
+.detail-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  margin-top: 6px;
+}
+
+.detail-label:first-child { margin-top: 0; }
+
+.detail-content {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.detail-content.error-content {
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.08);
+  padding: 4px 6px;
+  border-radius: 3px;
+}
+
+.show-full {
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  margin-top: 2px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.show-full:hover { text-decoration: underline; }
+
+/* Copy error button */
+.copy-error-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(124, 58, 237, 0.15);
-  border: 1px solid rgba(124, 58, 237, 0.3);
-  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  margin-top: 4px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
   padding: 2px 8px;
-  margin: 4px 0;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  border-radius: 3px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.copy-error-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--text-muted);
+}
+
+/* Collapsed summary for many steps */
+.collapsed-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
   font-size: 12px;
-  color: var(--accent);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.collapsed-summary:hover {
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--text-primary);
+}
+
+.collapsed-summary .collapse-icon {
+  font-size: 8px;
+  transition: transform 0.2s;
+}
+
+.collapsed-summary.expanded .collapse-icon {
+  transform: rotate(90deg);
+}
+
+/* Smooth expand animation for collapsed steps */
+.expanded-steps-wrap {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out;
+}
+
+.expanded-steps-wrap.visible {
+  max-height: 500px;
+}
+
+/* Completion meta bar */
+.completion-meta {
+  text-align: left;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text-muted);
+  padding: 6px 0 0;
+  border-top: 1px solid var(--border-color);
+  margin-top: 6px;
+  animation: fadeIn 0.3s ease-in;
+}
+
+.completion-meta.interrupted { color: var(--warning); }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Interrupted bar */
+.interrupted-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 12px;
+  margin-top: 6px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--warning);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* Thinking indicator (compact) */
+.thinking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  margin-bottom: 2px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.thinking-dots span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: thinkingDot 1.4s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes thinkingDot {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+
+/* Stop button */
+.btn-stop {
+  background: var(--error) !important;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  min-width: 80px;
+  height: 42px;
+  transition: background 0.15s;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  align-self: flex-end;
+}
+
+.btn-stop:hover {
+  background: #dc2626 !important;
 }
 
 /* Input area */
@@ -356,5 +731,9 @@ body {
 
   .input-area {
     padding: 10px 12px;
+  }
+
+  .tool-args-inline {
+    max-width: 120px;
   }
 }

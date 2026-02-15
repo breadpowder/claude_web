@@ -115,13 +115,61 @@ class TestSdkEventToChunk:
         assert chunk1["choices"][0]["delta"]["tool_calls"][0]["index"] == 0
         assert chunk2["choices"][0]["delta"]["tool_calls"][0]["index"] == 1
 
-    def test_tool_result_suppressed(self):
+    def test_tool_result_forwarded(self):
         request_id = "chatcmpl-test"
         chunk, idx = sdk_event_to_chunk(
-            {"type": "tool_result", "content": "result"}, request_id, 0
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_123",
+                "content": "result text",
+                "is_error": False,
+            },
+            request_id,
+            0,
         )
-        assert chunk is None
-        assert idx == 0
+        assert chunk is not None
+        tool_result = chunk["choices"][0]["delta"]["tool_result"]
+        assert tool_result["tool_use_id"] == "toolu_123"
+        assert tool_result["content"] == "result text"
+        assert tool_result["is_error"] is False
+        assert idx == 0  # tool_call_index unchanged for results
+
+    def test_tool_result_error_forwarded(self):
+        request_id = "chatcmpl-test"
+        chunk, idx = sdk_event_to_chunk(
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_456",
+                "content": "Validation failed",
+                "is_error": True,
+            },
+            request_id,
+            0,
+        )
+        assert chunk is not None
+        tool_result = chunk["choices"][0]["delta"]["tool_result"]
+        assert tool_result["is_error"] is True
+
+    def test_result_metadata_forwarded(self):
+        request_id = "chatcmpl-test"
+        chunk, idx = sdk_event_to_chunk(
+            {
+                "type": "result_metadata",
+                "num_turns": 3,
+                "total_cost_usd": 0.0012,
+                "duration_ms": 2400,
+                "usage": {"input_tokens": 1200, "output_tokens": 890},
+            },
+            request_id,
+            2,
+        )
+        assert chunk is not None
+        assert "meta" in chunk
+        assert chunk["meta"]["num_turns"] == 3
+        assert chunk["meta"]["total_cost_usd"] == 0.0012
+        assert chunk["meta"]["duration_ms"] == 2400
+        assert chunk["meta"]["usage"]["input_tokens"] == 1200
+        assert idx == 2
 
 
 class TestFinalChunk:

@@ -61,6 +61,20 @@ async def get_session(session_id: str, request: Request):
     return session
 
 
+@router.post("/{session_id}/interrupt")
+async def interrupt_session(session_id: str, request: Request):
+    """Interrupt an active query on a session."""
+    session_manager = request.app.state.session_manager
+    try:
+        await session_manager.interrupt(session_id)
+        return {"status": "interrupted", "session_id": session_id}
+    except SessionNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Session not found"},
+        )
+
+
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(session_id: str, request: Request):
     """Destroy a session."""
