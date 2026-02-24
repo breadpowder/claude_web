@@ -91,6 +91,26 @@ class PreWarmPool:
             except Exception as exc:
                 logger.error("Replenish failed: %s", exc)
 
+    async def drain(self) -> None:
+        """Close all pooled clients and empty the queue.
+
+        Must be called during shutdown to terminate pre-warmed subprocesses.
+        """
+        closed = 0
+        while not self._queue.empty():
+            try:
+                client = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if hasattr(client, "close"):
+                try:
+                    await client.close()
+                    closed += 1
+                except Exception as exc:
+                    logger.warning("Error closing pooled client: %s", exc)
+        if closed:
+            logger.info("Drained pre-warm pool: %d clients closed", closed)
+
     async def _create_client(self) -> Any:
         """Create a single client via the factory."""
         return await self._factory()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,7 +15,7 @@ from src.core.session_manager import SessionManager
 
 @dataclass
 class FakeClient:
-    """Minimal stand-in for ClaudeSDKClient."""
+    """Minimal stand-in for SDKClient."""
 
     session_id: str = ""
     pid: int = 99999
@@ -27,7 +27,7 @@ class FakeClient:
         pass
 
 
-def _make_session_manager(pool_clients=None, max_sessions=10):
+def _make_session_manager(pool_clients=None, max_sessions=10, resume_client_factory=None):
     """Create a SessionManager with fake dependencies."""
     pool = MagicMock()
     if pool_clients:
@@ -35,6 +35,7 @@ def _make_session_manager(pool_clients=None, max_sessions=10):
     else:
         pool.get.return_value = None
     pool.size.return_value = len(pool_clients) if pool_clients else 0
+    pool.replenish = AsyncMock()
 
     index = MagicMock()
     index.create.side_effect = lambda sid, meta: {
@@ -63,6 +64,7 @@ def _make_session_manager(pool_clients=None, max_sessions=10):
         subprocess_monitor=monitor,
         client_factory=_cold_start_factory,
         max_sessions=max_sessions,
+        resume_client_factory=resume_client_factory,
     )
     return sm, pool, index, monitor
 
@@ -96,6 +98,28 @@ class TestCreateSession:
             await sm.create_session()
         assert sm.active_session_count() == 2
 
+    @pytest.mark.asyncio
+    async def test_create_session_from_pool_triggers_replenish(self):
+        """When a client is acquired from pool, replenish is triggered."""
+        client = FakeClient(session_id="pooled-1", pid=11111)
+        sm, pool, index, monitor = _make_session_manager(pool_clients=[client])
+
+        await sm.create_session()
+
+        # Give the background task a moment to be created
+        await asyncio.sleep(0.05)
+        pool.replenish.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cold_start_does_not_trigger_replenish(self):
+        """When pool is empty and cold start is used, replenish is NOT triggered."""
+        sm, pool, index, monitor = _make_session_manager(pool_clients=[])
+
+        await sm.create_session()
+
+        await asyncio.sleep(0.05)
+        pool.replenish.assert_not_awaited()
+
 
 class TestQuery:
     @pytest.mark.asyncio
@@ -112,6 +136,21 @@ class TestQuery:
 
         assert len(events) >= 1
         assert any("content" in e for e in events)
+
+    @pytest.mark.asyncio
+    async def test_query_persists_sdk_session_id(self):
+        """After a query completes, sdk_session_id is persisted to the index."""
+        client = FakeClient(session_id="sdk-session-abc", pid=11111)
+        sm, pool, index, monitor = _make_session_manager(pool_clients=[client])
+
+        result = await sm.create_session()
+        session_id = result["session_id"]
+
+        async for _ in sm.query(session_id, "hello"):
+            pass
+
+        # session_id property on client should have been persisted
+        index.update.assert_called_with(session_id, {"sdk_session_id": "sdk-session-abc"})
 
     @pytest.mark.asyncio
     async def test_query_rejects_concurrent_run(self):
@@ -167,9 +206,83 @@ class TestDestroy:
 
 class TestResume:
     @pytest.mark.asyncio
-    async def test_resume_session_with_resume_param(self):
-        sm, pool, index, monitor = _make_session_manager()
+    async def test_resume_session_with_sdk_session_id(self):
+        """Resume uses the resume_client_factory with the SDK session id."""
+        resumed_client = FakeClient(session_id="resumed-sdk-id", pid=22222)
+        resume_factory = AsyncMock(return_value=resumed_client)
+
+        sm, pool, index, monitor = _make_session_manager(
+            resume_client_factory=resume_factory,
+        )
+        # Set up the index to return an entry with sdk_session_id
+        index.get.return_value = {
+            "session_id": "old-session-id",
+            "status": "terminated",
+            "is_resumable": True,
+            "sdk_session_id": "sdk-abc-123",
+        }
 
         result = await sm.resume_session("old-session-id")
         assert result["session_id"] != "old-session-id"
+        assert result["source"] == "resume"
+        assert sm.active_session_count() == 1
+
+        # Verify the resume factory was called with the SDK session id
+        resume_factory.assert_awaited_once_with("sdk-abc-123")
+
+    @pytest.mark.asyncio
+    async def test_resume_falls_back_without_sdk_session_id(self):
+        """If no sdk_session_id is stored, falls back to fresh client."""
+        resume_factory = AsyncMock()
+
+        sm, pool, index, monitor = _make_session_manager(
+            resume_client_factory=resume_factory,
+        )
+        # No sdk_session_id in the old entry
+        index.get.return_value = {
+            "session_id": "old-session-id",
+            "status": "terminated",
+            "is_resumable": True,
+        }
+
+        result = await sm.resume_session("old-session-id")
+        assert result["source"] == "resume"
+        assert sm.active_session_count() == 1
+
+        # resume_factory should NOT have been called (no sdk_session_id)
+        resume_factory.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_resume_falls_back_on_error(self):
+        """If resume factory raises, falls back to fresh client."""
+        resume_factory = AsyncMock(side_effect=RuntimeError("resume failed"))
+
+        sm, pool, index, monitor = _make_session_manager(
+            resume_client_factory=resume_factory,
+        )
+        index.get.return_value = {
+            "session_id": "old-session-id",
+            "status": "terminated",
+            "sdk_session_id": "sdk-abc-123",
+        }
+
+        result = await sm.resume_session("old-session-id")
+        assert result["source"] == "resume"
+        assert sm.active_session_count() == 1
+
+        # The old session should be marked as non-resumable
+        index.update.assert_any_call("old-session-id", {"is_resumable": False})
+
+    @pytest.mark.asyncio
+    async def test_resume_without_resume_factory(self):
+        """If no resume_client_factory is provided, falls back to regular factory."""
+        sm, pool, index, monitor = _make_session_manager()
+        index.get.return_value = {
+            "session_id": "old-session-id",
+            "status": "terminated",
+            "sdk_session_id": "sdk-abc-123",
+        }
+
+        result = await sm.resume_session("old-session-id")
+        assert result["source"] == "resume"
         assert sm.active_session_count() == 1

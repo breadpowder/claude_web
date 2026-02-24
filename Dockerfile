@@ -8,10 +8,17 @@ RUN npm run build
 
 # Stage 2: Python backend + serve frontend
 FROM python:3.12-slim AS runtime
+
+# Install curl + Node.js (required by claude-code-sdk)
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+COPY --from=frontend-build /usr/local/bin/node /usr/local/bin/node
+COPY --from=frontend-build /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    npm install -g @anthropic-ai/claude-code
+
 RUN pip install --no-cache-dir uv
 WORKDIR /app
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 RUN uv sync --no-dev
 COPY src/ ./src/
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist

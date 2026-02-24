@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,13 +13,17 @@ from src.core.prewarm_pool import PreWarmPool
 
 @dataclass
 class FakeClient:
-    """Minimal stand-in matching ClaudeSDKClient interface."""
+    """Minimal stand-in matching SDKClient interface."""
 
     query: AsyncMock = None
+    _closed: bool = field(default=False, repr=False)
 
     def __post_init__(self):
         if self.query is None:
             self.query = AsyncMock()
+
+    async def close(self):
+        self._closed = True
 
 
 async def _good_factory() -> FakeClient:
@@ -103,3 +107,53 @@ class TestReplenish:
         # After replenish with backoff retry, pool should eventually fill
         assert pool.size() == 1
         assert any("rate limit" in r.message.lower() or "backoff" in r.message.lower() for r in caplog.records)
+
+
+class TestDrain:
+    @pytest.mark.asyncio
+    async def test_drain_closes_all_pooled_clients(self):
+        clients = []
+
+        async def _tracking_factory():
+            c = FakeClient()
+            clients.append(c)
+            return c
+
+        pool = PreWarmPool(target_size=3, client_factory=_tracking_factory)
+        await pool.fill()
+        assert pool.size() == 3
+
+        await pool.drain()
+        assert pool.size() == 0
+        assert all(c._closed for c in clients)
+
+    @pytest.mark.asyncio
+    async def test_drain_on_empty_pool_is_noop(self):
+        pool = PreWarmPool(target_size=0, client_factory=_good_factory)
+        await pool.drain()  # should not raise
+        assert pool.size() == 0
+
+    @pytest.mark.asyncio
+    async def test_drain_only_closes_remaining_after_get(self):
+        clients = []
+
+        async def _tracking_factory():
+            c = FakeClient()
+            clients.append(c)
+            return c
+
+        pool = PreWarmPool(target_size=2, client_factory=_tracking_factory)
+        await pool.fill()
+
+        # Take one client out of the pool
+        acquired = pool.get()
+        assert pool.size() == 1
+
+        await pool.drain()
+        assert pool.size() == 0
+
+        # Only one should have been closed by drain (the one still in pool)
+        closed_by_drain = [c for c in clients if c._closed and c is not acquired]
+        assert len(closed_by_drain) == 1
+        # The acquired client should NOT have been closed by drain
+        assert not acquired._closed

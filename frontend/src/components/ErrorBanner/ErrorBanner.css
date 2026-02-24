@@ -1,0 +1,11 @@
+/* Error banner */
+.error-banner {
+  padding: 10px 16px;
+  background: var(--bg-error);
+  color: #fca5a5;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}

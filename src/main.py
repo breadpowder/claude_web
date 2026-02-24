@@ -20,7 +20,7 @@ from src.core.models import ExtensionConfig
 from src.core.options_builder import OptionsBuilder
 from src.core.prewarm_pool import PreWarmPool
 from src.core.prompt_expander import PromptExpander
-from src.core.sdk_client import create_client_factory
+from src.core.sdk_client import create_client_factory, create_resume_client_factory
 from src.core.session_index import JSONSessionIndex
 from src.core.session_manager import SessionManager
 from src.core.subprocess_monitor import SubprocessMonitor
@@ -123,12 +123,14 @@ def create_app(
         app.state.subprocess_monitor = monitor
 
         # 7. Create session manager
+        resume_factory = create_resume_client_factory(settings, extension_config)
         session_manager = SessionManager(
             pool=pool,
             session_index=session_index,
             subprocess_monitor=monitor,
             client_factory=factory,
             max_sessions=settings.max_sessions,
+            resume_client_factory=resume_factory,
         )
         app.state.session_manager = session_manager
 
@@ -148,6 +150,9 @@ def create_app(
                 await session_manager.destroy_session(session_id)
             except Exception as exc:
                 logger.warning("Error destroying session %s: %s", session_id, exc)
+
+        # Drain unused pre-warmed clients (terminates their subprocesses)
+        await pool.drain()
 
         logger.info("Core Engine shutdown complete")
 

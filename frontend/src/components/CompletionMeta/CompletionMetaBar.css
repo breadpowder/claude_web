@@ -1,0 +1,13 @@
+/* Completion meta bar */
+.completion-meta {
+  text-align: left;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text-muted);
+  padding: 6px 0 0;
+  border-top: 1px solid var(--border-color);
+  margin-top: 6px;
+  animation: fadeIn 0.3s ease-in;
+}
+
+.completion-meta.interrupted { color: var(--warning); }

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture Diagram — claude_web</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #e2e8f0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; color: #7c3aed; margin-bottom: 4px; }
+  .subtitle { font-size: 12px; color: #94a3b8; margin-bottom: 16px; }
+  .legend { display: flex; gap: 24px; margin-bottom: 20px; font-size: 11px; color: #94a3b8; align-items: center; }
+  .legend svg { vertical-align: middle; }
+  #arch-svg { max-width: 100%; height: auto; }
+
+  /* Tooltip */
+  .svg-tooltip {
+    position: fixed;
+    display: none;
+    background: #0d1117;
+    color: #e2e8f0;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    border: 1px solid #334155;
+    pointer-events: none;
+    z-index: 100;
+    max-width: 280px;
+    line-height: 1.5;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+</style>
+</head>
+<body>
+
+<h1>claude_web — Architecture</h1>
+<div class="subtitle">High-level system diagram</div>
+<div class="legend">
+  <span><svg width="24" height="4"><line x1="0" y1="2" x2="24" y2="2" stroke="#22c55e" stroke-width="2"/></svg> Implemented</span>
+  <span><svg width="24" height="4"><line x1="0" y1="2" x2="24" y2="2" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5,3"/></svg> Planned</span>
+</div>
+
+<div class="svg-tooltip" id="tooltip"></div>
+
+<svg id="arch-svg" viewBox="0 0 800 780" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Arrow marker -->
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#22c55e"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-pink" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#ec4899"/>
+    </marker>
+
+    <!-- Glow filter -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Animated dash -->
+    <style>
+      .flow-line { stroke-dasharray: 8 4; animation: dash 1.5s linear infinite; }
+      @keyframes dash { to { stroke-dashoffset: -24; } }
+      .hover-box { transition: opacity 0.2s, filter 0.2s; cursor: pointer; }
+      .hover-box:hover { filter: url(#glow); }
+      .pulse { animation: pulse-anim 2s ease-in-out infinite; }
+      @keyframes pulse-anim {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+      }
+      .fade-in { opacity: 0; animation: fadein 0.6s ease forwards; }
+      @keyframes fadein { to { opacity: 1; } }
+    </style>
+  </defs>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- FRONTEND BOX                                -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g class="hover-box fade-in" style="animation-delay:0.1s"
+     data-tip="React + Vite SPA&#10;Components: Header, MessageList, ChatInput, ToolSteps&#10;State: Zustand (session / extension / chat)&#10;Services: sseParser.ts, api.ts">
+    <rect x="60" y="10" width="680" height="50" rx="10"
+          fill="rgba(124,58,237,0.08)" stroke="#7c3aed" stroke-width="2"/>
+    <text x="400" y="41" text-anchor="middle" font-size="15" font-weight="700" fill="#7c3aed">
+      FRONTEND (React + Vite)
+    </text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- THREE INTERFACES                            -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <!-- SSE/REST (current) -->
+  <g class="hover-box fade-in" style="animation-delay:0.2s"
+     data-tip="SSE / REST (Implemented)&#10;POST /v1/chat/completions (SSE stream)&#10;POST /api/v1/sessions&#10;GET /api/v1/extensions&#10;POST /api/v1/sessions/{id}/interrupt">
+    <!-- line down from frontend -->
+    <line x1="210" y1="60" x2="210" y2="82" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+    <rect x="140" y="86" width="140" height="52" rx="8"
+          fill="rgba(34,197,94,0.08)" stroke="#22c55e" stroke-width="2"/>
+    <text x="210" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="#22c55e">SSE / REST</text>
+    <text x="210" y="125" text-anchor="middle" font-size="10" fill="#22c55e" opacity="0.7">(current)</text>
+    <!-- line down to gateway -->
+    <line x1="210" y1="138" x2="210" y2="160" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  </g>
+
+  <!-- AG-UI (planned) -->
+  <g class="hover-box fade-in" style="animation-delay:0.3s"
+     data-tip="AG-UI (Planned)&#10;POST /agent/run&#10;Typed lifecycle events:&#10;RunStarted, TextMessage,&#10;ToolCallStart/End, StateSnapshot">
+    <line x1="400" y1="60" x2="400" y2="82" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow-blue)"/>
+    <rect x="330" y="86" width="140" height="52" rx="8"
+          fill="rgba(59,130,246,0.06)" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6,3"/>
+    <text x="400" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="#3b82f6">AG-UI</text>
+    <text x="400" y="125" text-anchor="middle" font-size="10" fill="#3b82f6" opacity="0.7">(planned)</text>
+    <line x1="400" y1="138" x2="400" y2="160" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow-blue)"/>
+  </g>
+
+  <!-- GraphQL (planned) -->
+  <g class="hover-box fade-in" style="animation-delay:0.4s"
+     data-tip="GraphQL (Planned)&#10;POST /graphql&#10;Queries: sessionHistory,&#10;analytics, extensionCatalog&#10;Subscriptions: onMessage (future)">
+    <line x1="590" y1="60" x2="590" y2="82" stroke="#ec4899" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+    <rect x="520" y="86" width="140" height="52" rx="8"
+          fill="rgba(236,72,153,0.06)" stroke="#ec4899" stroke-width="2" stroke-dasharray="6,3"/>
+    <text x="590" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="#ec4899">GraphQL</text>
+    <text x="590" y="125" text-anchor="middle" font-size="10" fill="#ec4899" opacity="0.7">(planned)</text>
+    <line x1="590" y1="138" x2="590" y2="160" stroke="#ec4899" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+  </g>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- API GATEWAY BOX                             -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g class="hover-box fade-in" style="animation-delay:0.5s"
+     data-tip="FastAPI API Gateway&#10;Routers: OpenAI, Sessions, Health, Extensions&#10;Planned: AG-UI Router, GraphQL Router&#10;Middleware: CORS, Static SPA (frontend/dist/)">
+    <rect x="60" y="164" width="680" height="50" rx="10"
+          fill="rgba(6,182,212,0.08)" stroke="#06b6d4" stroke-width="2"/>
+    <text x="400" y="195" text-anchor="middle" font-size="15" font-weight="700" fill="#06b6d4">
+      API GATEWAY (FastAPI)
+    </text>
+  </g>
+
+  <!-- ─── Connector: Gateway → Core Engine ─── -->
+  <line x1="400" y1="214" x2="400" y2="240" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)" class="fade-in" style="animation-delay:0.55s"/>
+  <text x="400" y="234" text-anchor="middle" font-size="10" fill="#94a3b8" class="fade-in" style="animation-delay:0.55s">async generator</text>
+
+  <!-- Animated flow particle on main pipe -->
+  <circle r="3" fill="#06b6d4" opacity="0.8">
+    <animateMotion dur="2s" repeatCount="indefinite" path="M400,214 L400,240"/>
+  </circle>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- CORE ENGINE BOX                             -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g class="fade-in" style="animation-delay:0.6s">
+    <rect x="60" y="248" width="680" height="240" rx="10"
+          fill="rgba(245,158,11,0.05)" stroke="#f59e0b" stroke-width="2"/>
+    <text x="400" y="274" text-anchor="middle" font-size="15" font-weight="700" fill="#f59e0b">
+      CORE ENGINE
+    </text>
+
+    <!-- Management row -->
+    <g class="hover-box" data-tip="Session Mgmt&#10;Create, query, interrupt, resume, destroy sessions&#10;src/core/session_manager.py">
+      <rect x="120" y="290" width="150" height="36" rx="6"
+            fill="rgba(245,158,11,0.1)" stroke="rgba(245,158,11,0.4)" stroke-width="1"/>
+      <text x="195" y="313" text-anchor="middle" font-size="12" font-weight="600" fill="#f59e0b">Session Mgmt</text>
+    </g>
+    <g class="hover-box" data-tip="Config Mgmt&#10;OptionsBuilder: ExtensionConfig → ClaudeCodeOptions&#10;src/core/options_builder.py">
+      <rect x="290" y="290" width="150" height="36" rx="6"
+            fill="rgba(245,158,11,0.1)" stroke="rgba(245,158,11,0.4)" stroke-width="1"/>
+      <text x="365" y="313" text-anchor="middle" font-size="12" font-weight="600" fill="#f59e0b">Config Mgmt</text>
+    </g>
+    <g class="hover-box" data-tip="Extension Loader&#10;Filesystem scanner for MCP servers,&#10;skills (.md), and slash commands&#10;src/core/extension_loader.py">
+      <rect x="460" y="290" width="170" height="36" rx="6"
+            fill="rgba(245,158,11,0.1)" stroke="rgba(245,158,11,0.4)" stroke-width="1"/>
+      <text x="545" y="313" text-anchor="middle" font-size="12" font-weight="600" fill="#f59e0b">Extension Loader</text>
+    </g>
+
+    <!-- Connector lines from mgmt to stack -->
+    <line x1="195" y1="326" x2="195" y2="345" stroke="rgba(245,158,11,0.3)" stroke-width="1"/>
+    <line x1="545" y1="326" x2="545" y2="345" stroke="rgba(245,158,11,0.3)" stroke-width="1"/>
+
+    <!-- Stacked layers -->
+    <g class="hover-box" data-tip="Agent SDK&#10;claude-code-sdk Python wrapper&#10;Async streaming query interface">
+      <rect x="120" y="345" width="560" height="38" rx="8 8 0 0"
+            fill="rgba(255,255,255,0.04)" stroke="#334155" stroke-width="1"/>
+      <text x="400" y="369" text-anchor="middle" font-size="13" font-weight="700" fill="#e2e8f0">Agent SDK</text>
+    </g>
+    <g class="hover-box" data-tip="Claude Code CLI&#10;Subprocess per session&#10;Bidirectional stdio streaming&#10;via ClaudeSDKClient">
+      <rect x="120" y="382" width="560" height="38"
+            fill="rgba(255,255,255,0.03)" stroke="#334155" stroke-width="1"/>
+      <text x="400" y="406" text-anchor="middle" font-size="13" font-weight="700" fill="#e2e8f0">
+        Claude Code CLI
+      </text>
+      <text x="534" y="406" font-size="10" fill="#94a3b8">(subprocess)</text>
+    </g>
+    <g class="hover-box" data-tip="AWS Bedrock&#10;IAM-authenticated model access&#10;Alternative to direct Anthropic API">
+      <rect x="120" y="419" width="560" height="38" rx="0 0 8 8"
+            fill="rgba(255,255,255,0.02)" stroke="#334155" stroke-width="1"/>
+      <text x="400" y="443" text-anchor="middle" font-size="13" font-weight="700" fill="#e2e8f0">AWS Bedrock</text>
+    </g>
+  </g>
+
+  <!-- ─── Connector: Core Engine → SOP ─── -->
+  <line x1="400" y1="488" x2="400" y2="516" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)" class="fade-in" style="animation-delay:0.7s"/>
+  <text x="400" y="508" text-anchor="middle" font-size="10" fill="#94a3b8" class="fade-in" style="animation-delay:0.7s">loads / scans</text>
+
+  <!-- Animated flow particle -->
+  <circle r="3" fill="#ec4899" opacity="0.8">
+    <animateMotion dur="2.5s" repeatCount="indefinite" path="M400,488 L400,516"/>
+  </circle>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- SOP EXTENSIONS BOX                          -->
+  <!-- ═══════════════════════════════════════════ -->
+  <g class="fade-in" style="animation-delay:0.8s">
+    <rect x="60" y="524" width="680" height="240" rx="10"
+          fill="rgba(236,72,153,0.04)" stroke="#ec4899" stroke-width="2"/>
+    <text x="400" y="550" text-anchor="middle" font-size="15" font-weight="700" fill="#ec4899">
+      SOP EXTENSIONS
+    </text>
+    <text x="400" y="567" text-anchor="middle" font-size="11" fill="#94a3b8" font-style="italic">
+      default package + self-serve per business line
+    </text>
+
+    <!-- Card: Reporting -->
+    <g class="hover-box" data-tip="Reporting SOP&#10;Business line extension package&#10;Contains skills, slash commands,&#10;and CX-tool Python plugins">
+      <rect x="110" y="582" width="170" height="160" rx="8"
+            fill="rgba(236,72,153,0.06)" stroke="rgba(236,72,153,0.3)" stroke-width="1"/>
+      <text x="195" y="606" text-anchor="middle" font-size="14" font-weight="700" fill="#ec4899">Reporting</text>
+      <line x1="126" y1="614" x2="264" y2="614" stroke="rgba(236,72,153,0.2)" stroke-width="1"/>
+      <text x="130" y="636" font-size="11" fill="#94a3b8">Skills (.md)</text>
+      <text x="130" y="656" font-size="11" fill="#94a3b8">Commands</text>
+      <text x="130" y="676" font-size="11" fill="#94a3b8">Plugins</text>
+      <text x="130" y="696" font-size="11" fill="#94a3b8">(CX-tool py)</text>
+    </g>
+
+    <!-- Card: Compliance -->
+    <g class="hover-box" data-tip="Compliance SOP&#10;Business line extension package&#10;Contains skills, slash commands,&#10;and CX-tool Python plugins">
+      <rect x="310" y="582" width="170" height="160" rx="8"
+            fill="rgba(236,72,153,0.06)" stroke="rgba(236,72,153,0.3)" stroke-width="1"/>
+      <text x="395" y="606" text-anchor="middle" font-size="14" font-weight="700" fill="#ec4899">Compliance</text>
+      <line x1="326" y1="614" x2="464" y2="614" stroke="rgba(236,72,153,0.2)" stroke-width="1"/>
+      <text x="330" y="636" font-size="11" fill="#94a3b8">Skills (.md)</text>
+      <text x="330" y="656" font-size="11" fill="#94a3b8">Commands</text>
+      <text x="330" y="676" font-size="11" fill="#94a3b8">Plugins</text>
+      <text x="330" y="696" font-size="11" fill="#94a3b8">(CX-tool py)</text>
+    </g>
+
+    <!-- Card: ... -->
+    <g class="hover-box pulse" data-tip="Additional business lines&#10;Self-serve: each team can add&#10;their own SOP extension package">
+      <rect x="510" y="582" width="170" height="160" rx="8"
+            fill="rgba(236,72,153,0.03)" stroke="rgba(236,72,153,0.2)" stroke-width="1" stroke-dasharray="5,3"/>
+      <text x="595" y="606" text-anchor="middle" font-size="14" font-weight="700" fill="#ec4899" opacity="0.5">...</text>
+      <line x1="526" y1="614" x2="664" y2="614" stroke="rgba(236,72,153,0.1)" stroke-width="1"/>
+      <text x="530" y="636" font-size="11" fill="#94a3b8" opacity="0.5">Skills (.md)</text>
+      <text x="530" y="656" font-size="11" fill="#94a3b8" opacity="0.5">Commands</text>
+      <text x="530" y="676" font-size="11" fill="#94a3b8" opacity="0.5">Plugins</text>
+      <text x="530" y="696" font-size="11" fill="#94a3b8" opacity="0.5">(CX-tool py)</text>
+    </g>
+  </g>
+
+</svg>
+
+<script>
+const tooltip = document.getElementById('tooltip');
+
+document.querySelectorAll('[data-tip]').forEach(el => {
+  el.addEventListener('mouseenter', e => {
+    tooltip.innerHTML = el.getAttribute('data-tip').replace(/\n/g, '<br>');
+    tooltip.style.display = 'block';
+  });
+  el.addEventListener('mousemove', e => {
+    tooltip.style.left = (e.clientX + 14) + 'px';
+    tooltip.style.top = (e.clientY + 14) + 'px';
+  });
+  el.addEventListener('mouseleave', () => {
+    tooltip.style.display = 'none';
+  });
+});
+</script>
+
+</body>
+</html>

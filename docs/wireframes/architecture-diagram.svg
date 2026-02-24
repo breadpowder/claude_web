@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 820" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0L8,3L0,6" fill="#22c55e"/></marker>
+    <marker id="b" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0L8,3L0,6" fill="#3b82f6"/></marker>
+    <marker id="c" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0L8,3L0,6" fill="#ec4899"/></marker>
+    <marker id="d" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0L8,3L0,6" fill="#94a3b8"/></marker>
+
+    <filter id="glow-purple"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="glow-cyan"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#06b6d4" flood-opacity="0.4"/></filter>
+    <filter id="glow-amber"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b" flood-opacity="0.3"/></filter>
+    <filter id="glow-pink"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ec4899" flood-opacity="0.3"/></filter>
+
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#0f0f1e"/>
+    </linearGradient>
+
+    <style>
+      .flow-down { stroke-dasharray:8 4; animation:dash 1.5s linear infinite }
+      @keyframes dash { to { stroke-dashoffset:-24 } }
+      .pulse { animation:p 2.5s ease-in-out infinite }
+      @keyframes p { 0%,100%{opacity:.5} 50%{opacity:1} }
+      .fade1 { opacity:0; animation:fi .6s .1s ease forwards }
+      .fade2 { opacity:0; animation:fi .6s .25s ease forwards }
+      .fade3 { opacity:0; animation:fi .6s .4s ease forwards }
+      .fade4 { opacity:0; animation:fi .6s .55s ease forwards }
+      .fade5 { opacity:0; animation:fi .6s .7s ease forwards }
+      @keyframes fi { to { opacity:1 } }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="820" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="400" y="32" text-anchor="middle" font-size="18" font-weight="700" fill="#7c3aed">claude_web — Architecture</text>
+  <text x="400" y="50" text-anchor="middle" font-size="11" fill="#94a3b8">High-level system diagram</text>
+
+  <!-- Legend -->
+  <line x1="280" y1="68" x2="304" y2="68" stroke="#22c55e" stroke-width="2"/>
+  <text x="310" y="72" font-size="10" fill="#94a3b8">Implemented</text>
+  <line x1="390" y1="68" x2="414" y2="68" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="420" y="72" font-size="10" fill="#94a3b8">Planned</text>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- FRONTEND                                   -->
+  <!-- ══════════════════════════════════════════ -->
+  <g class="fade1" filter="url(#glow-purple)">
+    <rect x="70" y="88" width="660" height="48" rx="10" fill="rgba(124,58,237,0.1)" stroke="#7c3aed" stroke-width="2"/>
+    <text x="400" y="118" text-anchor="middle" font-size="15" font-weight="700" fill="#7c3aed">FRONTEND (React + Vite)</text>
+  </g>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- THREE INTERFACES                            -->
+  <!-- ══════════════════════════════════════════ -->
+  <g class="fade2">
+    <!-- SSE/REST -->
+    <line x1="210" y1="136" x2="210" y2="156" stroke="#22c55e" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="140" y="160" width="140" height="50" rx="8" fill="rgba(34,197,94,0.1)" stroke="#22c55e" stroke-width="2"/>
+    <text x="210" y="180" text-anchor="middle" font-size="11" font-weight="700" fill="#22c55e">OpenAI Compliant</text>
+    <text x="210" y="198" text-anchor="middle" font-size="11" font-weight="700" fill="#22c55e">API</text>
+    <line x1="210" y1="210" x2="210" y2="230" stroke="#22c55e" stroke-width="2" marker-end="url(#a)"/>
+
+    <!-- AG-UI -->
+    <line x1="400" y1="136" x2="400" y2="156" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#b)"/>
+    <rect x="330" y="160" width="140" height="50" rx="8" fill="rgba(59,130,246,0.07)" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6,3"/>
+    <text x="400" y="180" text-anchor="middle" font-size="11" font-weight="700" fill="#3b82f6">Agentic</text>
+    <text x="400" y="198" text-anchor="middle" font-size="11" font-weight="700" fill="#3b82f6">AG-UI</text>
+    <line x1="400" y1="210" x2="400" y2="230" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#b)"/>
+
+    <!-- GraphQL -->
+    <line x1="590" y1="136" x2="590" y2="156" stroke="#ec4899" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#c)"/>
+    <rect x="520" y="160" width="140" height="50" rx="8" fill="rgba(236,72,153,0.07)" stroke="#ec4899" stroke-width="2" stroke-dasharray="6,3"/>
+    <text x="590" y="180" text-anchor="middle" font-size="11" font-weight="700" fill="#ec4899">GraphQL / REST</text>
+    <text x="590" y="198" text-anchor="middle" font-size="11" font-weight="700" fill="#ec4899">Service</text>
+    <line x1="590" y1="210" x2="590" y2="230" stroke="#ec4899" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#c)"/>
+  </g>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- API GATEWAY                                 -->
+  <!-- ══════════════════════════════════════════ -->
+  <g class="fade3" filter="url(#glow-cyan)">
+    <rect x="70" y="234" width="660" height="48" rx="10" fill="rgba(6,182,212,0.1)" stroke="#06b6d4" stroke-width="2"/>
+    <text x="400" y="264" text-anchor="middle" font-size="15" font-weight="700" fill="#06b6d4">API GATEWAY (FastAPI)</text>
+  </g>
+
+  <!-- Connector: Gateway → Engine -->
+  <line x1="400" y1="282" x2="400" y2="312" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#d)" class="fade3"/>
+  <text x="400" y="304" text-anchor="middle" font-size="10" fill="#94a3b8" class="fade3">async generator</text>
+  <!-- Animated particle -->
+  <circle r="3" fill="#06b6d4" opacity=".8"><animateMotion dur="2s" repeatCount="indefinite" path="M400,282 L400,312"/></circle>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- CORE ENGINE                                 -->
+  <!-- ══════════════════════════════════════════ -->
+  <g class="fade4" filter="url(#glow-amber)">
+    <rect x="70" y="318" width="660" height="230" rx="10" fill="rgba(245,158,11,0.06)" stroke="#f59e0b" stroke-width="2"/>
+    <text x="400" y="344" text-anchor="middle" font-size="15" font-weight="700" fill="#f59e0b">CORE ENGINE</text>
+
+    <!-- Mgmt boxes -->
+    <rect x="130" y="358" width="150" height="34" rx="6" fill="rgba(245,158,11,0.12)" stroke="rgba(245,158,11,0.45)" stroke-width="1"/>
+    <text x="205" y="380" text-anchor="middle" font-size="12" font-weight="600" fill="#f59e0b">Session Mgmt</text>
+
+    <rect x="300" y="358" width="150" height="34" rx="6" fill="rgba(245,158,11,0.12)" stroke="rgba(245,158,11,0.45)" stroke-width="1"/>
+    <text x="375" y="380" text-anchor="middle" font-size="12" font-weight="600" fill="#f59e0b">Config Mgmt</text>
+
+    <rect x="470" y="358" width="170" height="34" rx="6" fill="rgba(245,158,11,0.12)" stroke="rgba(245,158,11,0.45)" stroke-width="1"/>
+    <text x="555" y="380" text-anchor="middle" font-size="12" font-weight="600" fill="#f59e0b">Extension Loader</text>
+
+    <!-- Thin lines down -->
+    <line x1="205" y1="392" x2="205" y2="412" stroke="rgba(245,158,11,0.3)" stroke-width="1"/>
+    <line x1="555" y1="392" x2="555" y2="412" stroke="rgba(245,158,11,0.3)" stroke-width="1"/>
+
+    <!-- Stack -->
+    <rect x="130" y="412" width="540" height="36" rx="8 8 0 0" fill="rgba(255,255,255,0.05)" stroke="#334155" stroke-width="1"/>
+    <text x="400" y="435" text-anchor="middle" font-size="13" font-weight="700" fill="#e2e8f0">Agent SDK</text>
+
+    <rect x="130" y="447" width="540" height="36" fill="rgba(255,255,255,0.035)" stroke="#334155" stroke-width="1"/>
+    <text x="370" y="470" text-anchor="middle" font-size="13" font-weight="700" fill="#e2e8f0">Claude Code CLI</text>
+    <text x="490" y="470" font-size="10" fill="#94a3b8">(subprocess)</text>
+
+    <rect x="130" y="482" width="540" height="36" rx="0 0 8 8" fill="rgba(255,255,255,0.025)" stroke="#334155" stroke-width="1"/>
+    <text x="400" y="505" text-anchor="middle" font-size="13" font-weight="700" fill="#e2e8f0">AWS Bedrock</text>
+  </g>
+
+  <!-- Connector: Engine → SOP -->
+  <line x1="400" y1="548" x2="400" y2="578" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#d)" class="fade4"/>
+  <text x="400" y="570" text-anchor="middle" font-size="10" fill="#94a3b8" class="fade4">loads / scans</text>
+  <circle r="3" fill="#ec4899" opacity=".8"><animateMotion dur="2.5s" repeatCount="indefinite" path="M400,548 L400,578"/></circle>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- SOP EXTENSIONS                              -->
+  <!-- ══════════════════════════════════════════ -->
+  <g class="fade5" filter="url(#glow-pink)">
+    <rect x="70" y="584" width="660" height="224" rx="10" fill="rgba(236,72,153,0.05)" stroke="#ec4899" stroke-width="2"/>
+    <text x="400" y="610" text-anchor="middle" font-size="15" font-weight="700" fill="#ec4899">SOP EXTENSIONS</text>
+    <text x="400" y="626" text-anchor="middle" font-size="11" fill="#94a3b8" font-style="italic">default package + self-serve per business line</text>
+
+    <!-- Reporting -->
+    <rect x="110" y="642" width="170" height="148" rx="8" fill="rgba(236,72,153,0.07)" stroke="rgba(236,72,153,0.35)" stroke-width="1"/>
+    <text x="195" y="666" text-anchor="middle" font-size="14" font-weight="700" fill="#ec4899">Reporting</text>
+    <line x1="126" y1="674" x2="264" y2="674" stroke="rgba(236,72,153,0.2)" stroke-width="1"/>
+    <text x="132" y="696" font-size="11" fill="#94a3b8">Skills (.md)</text>
+    <text x="132" y="716" font-size="11" fill="#94a3b8">Commands</text>
+    <text x="132" y="736" font-size="11" fill="#94a3b8">Plugins</text>
+    <text x="132" y="756" font-size="11" fill="#94a3b8">(CX-tool py)</text>
+
+    <!-- Compliance -->
+    <rect x="310" y="642" width="170" height="148" rx="8" fill="rgba(236,72,153,0.07)" stroke="rgba(236,72,153,0.35)" stroke-width="1"/>
+    <text x="395" y="666" text-anchor="middle" font-size="14" font-weight="700" fill="#ec4899">Compliance</text>
+    <line x1="326" y1="674" x2="464" y2="674" stroke="rgba(236,72,153,0.2)" stroke-width="1"/>
+    <text x="332" y="696" font-size="11" fill="#94a3b8">Skills (.md)</text>
+    <text x="332" y="716" font-size="11" fill="#94a3b8">Commands</text>
+    <text x="332" y="736" font-size="11" fill="#94a3b8">Plugins</text>
+    <text x="332" y="756" font-size="11" fill="#94a3b8">(CX-tool py)</text>
+
+    <!-- ... -->
+    <g class="pulse">
+      <rect x="510" y="642" width="170" height="148" rx="8" fill="rgba(236,72,153,0.03)" stroke="rgba(236,72,153,0.2)" stroke-width="1" stroke-dasharray="5,3"/>
+      <text x="595" y="666" text-anchor="middle" font-size="14" font-weight="700" fill="#ec4899" opacity=".5">...</text>
+      <line x1="526" y1="674" x2="664" y2="674" stroke="rgba(236,72,153,0.1)" stroke-width="1"/>
+      <text x="532" y="696" font-size="11" fill="#94a3b8" opacity=".5">Skills (.md)</text>
+      <text x="532" y="716" font-size="11" fill="#94a3b8" opacity=".5">Commands</text>
+      <text x="532" y="736" font-size="11" fill="#94a3b8" opacity=".5">Plugins</text>
+      <text x="532" y="756" font-size="11" fill="#94a3b8" opacity=".5">(CX-tool py)</text>
+    </g>
+  </g>
+
+</svg>

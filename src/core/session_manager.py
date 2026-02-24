@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any, AsyncGenerator, Callable, Coroutine
 
@@ -21,11 +22,13 @@ class SessionManager:
         subprocess_monitor,
         client_factory: Callable[[], Coroutine[Any, Any, Any]],
         max_sessions: int = 10,
+        resume_client_factory: Callable[..., Coroutine[Any, Any, Any]] | None = None,
     ):
         self._pool = pool
         self._index = session_index
         self._monitor = subprocess_monitor
         self._client_factory = client_factory
+        self._resume_client_factory = resume_client_factory
         self._max_sessions = max_sessions
         self._sessions: dict[str, Any] = {}  # session_id -> client
         self._active_runs: set[str] = set()
@@ -51,6 +54,8 @@ class SessionManager:
         client = self._pool.get()
         if client is not None:
             source = "pre-warm"
+            # Trigger background replenishment to replace the acquired client
+            asyncio.create_task(self._pool.replenish())
         else:
             client = await self._client_factory()
             source = "cold"
@@ -87,6 +92,10 @@ class SessionManager:
             client = self._sessions[session_id]
             async for event in client.query(prompt):
                 yield event
+            # Persist SDK session id for future resume
+            sdk_session_id = getattr(client, "session_id", None)
+            if sdk_session_id:
+                self._index.update(session_id, {"sdk_session_id": sdk_session_id})
         finally:
             self._active_runs.discard(session_id)
             self._monitor.mark_query_complete(session_id)
@@ -119,12 +128,26 @@ class SessionManager:
     async def resume_session(self, old_session_id: str) -> dict:
         """Resume a terminated session by creating a new client with resume parameter.
 
+        Looks up the SDK session id from the old session's metadata and passes
+        it via ``ClaudeCodeOptions.resume`` so the conversation history is loaded.
+
         Returns new session metadata.
         """
         session_id = str(uuid.uuid4())
 
+        # Look up the SDK session id stored during the last query
+        old_entry = self._index.get(old_session_id)
+        sdk_session_id = (old_entry or {}).get("sdk_session_id")
+
         try:
-            client = await self._client_factory()
+            if sdk_session_id and self._resume_client_factory:
+                client = await self._resume_client_factory(sdk_session_id)
+            else:
+                logger.warning(
+                    "No sdk_session_id for %s, creating fresh session",
+                    old_session_id,
+                )
+                client = await self._client_factory()
         except Exception:
             logger.warning(
                 "Resume failed for %s, falling back to fresh session",

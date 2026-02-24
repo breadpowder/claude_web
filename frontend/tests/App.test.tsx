@@ -329,7 +329,7 @@ describe('TASK-010: Basic Chatbot', () => {
     })
   })
 
-  test('no zustand, no ag-ui, no radix, no tailwind in dependencies', async () => {
+  test('zustand is a dependency; no ag-ui, no radix, no tailwind', async () => {
     const pkg = await import('../package.json')
     const allDeps = {
       ...pkg.dependencies,
@@ -337,7 +337,7 @@ describe('TASK-010: Basic Chatbot', () => {
     }
     const depNames = Object.keys(allDeps)
 
-    expect(depNames).not.toContain('zustand')
+    expect(depNames).toContain('zustand')
     expect(depNames.some((d: string) => d.includes('ag-ui'))).toBe(false)
     expect(depNames.some((d: string) => d.includes('@radix-ui'))).toBe(false)
     expect(depNames).not.toContain('tailwindcss')
