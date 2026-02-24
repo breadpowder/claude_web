@@ -91,9 +91,8 @@ def create_app(
         if not skip_prewarm:
             try:
                 await pool.fill()
-            except RuntimeError as exc:
-                logger.critical("Pre-warm pool fill failed: %s", exc)
-                raise
+            except Exception as exc:
+                logger.warning("Pre-warm pool fill failed (server will create clients on demand): %s", exc)
         app.state.pool = pool
 
         # 6. Create subprocess monitor

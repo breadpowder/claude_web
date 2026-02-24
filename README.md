@@ -42,13 +42,13 @@ When completed steps exceed 5, older steps collapse into a summary line (e.g., "
 **MCP Server + Skills Integration**
 Configure external tools (GitHub, Slack, databases) via MCP servers and reusable workflows via slash-command skills — all defined in configuration, no code changes.
 
-**AWS Bedrock Support**
-Run against Anthropic's API directly or through AWS Bedrock with IAM authentication.
+**Dual Provider Support**
+Run against AWS Bedrock (subprocess-based, with pre-warm pool) or any OpenAI-compatible endpoint via LiteLLM (in-process, no subprocess overhead).
 
 ## Architecture
 
 ```
-Browser (React + Vite)
+Browser (React 19 + Vite + Zustand)
   │
   │  SSE stream (OpenAI-compatible format)
   ▼
@@ -76,6 +76,19 @@ Claude Code CLI
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed
 - Anthropic API key or AWS Bedrock access
 
+### Docker (Recommended)
+
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+
+docker compose up --build
+```
+
+The app is available at `http://localhost:8000` (backend serves the built frontend as static files).
+
+The Docker image runs as a non-root `claude` user — required by the Claude Code SDK which rejects `--dangerously-skip-permissions` under root.
+
 ### Local Development
 
 1. **Clone and install backend dependencies:**
@@ -94,52 +107,68 @@ cp .env.example .env
 # Edit .env — set ANTHROPIC_API_KEY or AWS Bedrock credentials
 ```
 
-3. **Install and build frontend:**
+3. **Install and start frontend (dev server with hot reload):**
 
 ```bash
 cd frontend
 npm install
-npm run dev  # Starts dev server on http://localhost:5173
+npm run dev  # Starts on http://localhost:5173, proxies /api and /v1 to backend
 ```
 
-4. **Start backend:**
+4. **Start backend (from project root):**
 
 ```bash
-# From project root
 uv run uvicorn src.main:get_app --factory --host 0.0.0.0 --port 8000
 ```
 
 5. **Open** `http://localhost:5173` in your browser.
 
-### Docker
-
-```bash
-cp .env.example .env
-# Edit .env with your credentials
-
-docker compose up --build
-```
-
-The app is available at `http://localhost:8000` (frontend served by the backend).
-
 ## Configuration
 
-All configuration is via environment variables (or `.env` file):
+Configuration is driven by `config.yaml` with `${ENV_VAR}` resolution from `.env`:
+
+```yaml
+provider: bedrock          # "bedrock" or "litellm"
+
+bedrock:
+  model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  region: ${AWS_REGION}
+  access_key_id: ${AWS_ACCESS_KEY_ID}
+  secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+  session_token: ${AWS_SESSION_TOKEN}
+
+litellm:
+  model: anthropic/claude-sonnet-4-5-20250929
+  api_key: ${ANTHROPIC_API_KEY}
+
+engine:
+  prewarm_pool_size: 2
+  max_sessions: 10
+  cors_origins: "*"
+  log_level: INFO
+  project_cwd: .
+```
+
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | — | Anthropic API key (Option A) |
-| `CLAUDE_CODE_USE_BEDROCK` | — | Set to `1` for AWS Bedrock (Option B) |
-| `AWS_REGION` | `us-east-1` | AWS region for Bedrock |
-| `AWS_ACCESS_KEY_ID` | — | AWS credentials (or use `AWS_PROFILE`) |
-| `ANTHROPIC_MODEL` | — | Model override (e.g., `us.anthropic.claude-sonnet-4-5-20250929-v1:0`) |
-| `PREWARM_POOL_SIZE` | `2` | Number of pre-warmed SDK sessions |
+| **Bedrock Auth** | | |
+| `AWS_ACCESS_KEY_ID` | — | AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | — | AWS secret key |
+| `AWS_SESSION_TOKEN` | — | AWS temporary session token (optional) |
+| `AWS_REGION` | `us-east-1` | AWS region |
+| `AWS_PROFILE` | — | AWS profile name (alternative to keys) |
+| **LiteLLM Auth** | | |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key |
+| **Engine Settings** | | |
+| `PREWARM_POOL_SIZE` | `2` | Pre-warmed SDK sessions (Bedrock only; LiteLLM forces 0) |
 | `MAX_SESSIONS` | `10` | Maximum concurrent sessions |
+| `MAX_SESSION_DURATION_SECONDS` | `3600` | Session timeout |
+| `MAX_SESSION_RSS_MB` | `512` | Memory limit per session subprocess |
 | `PROJECT_CWD` | `.` | Working directory for Claude Code |
 | `LOG_LEVEL` | `INFO` | Logging level |
-| `CORS_ORIGINS` | `*` | Allowed CORS origins |
-
-See [`.env.example`](.env.example) for full documentation including Bedrock authentication methods.
+| `CORS_ORIGINS` | `*` | Allowed CORS origins (comma-separated) |
 
 ## API Reference
 
@@ -168,7 +197,7 @@ DELETE /api/v1/sessions/{id}               # Destroy session
 
 ```
 GET    /api/v1/health/live                 # Liveness probe
-GET    /api/v1/health/ready                # Readiness probe (pool status)
+GET    /api/v1/health/ready                # Readiness probe (pool + session metrics)
 GET    /api/v1/extensions                  # List MCP servers, skills, commands
 ```
 
@@ -178,7 +207,7 @@ GET    /api/v1/extensions                  # List MCP servers, skills, commands
 # Backend tests (unit + integration + e2e)
 uv run pytest tests/
 
-# Frontend tests
+# Frontend tests (27 integration tests via Vitest + Testing Library)
 cd frontend && npm test
 ```
 
@@ -186,35 +215,64 @@ cd frontend && npm test
 
 ```
 claude-web/
-├── src/
-│   ├── main.py                    # App factory, startup sequence
+├── src/                                # Python backend
+│   ├── main.py                         # App factory, lifespan startup/shutdown
 │   ├── core/
-│   │   ├── sdk_client.py          # Claude Code SDK wrapper
-│   │   ├── session_manager.py     # Session lifecycle
-│   │   ├── prewarm_pool.py        # Pre-warmed session pool
-│   │   ├── config.py              # Settings (env vars)
-│   │   ├── extension_loader.py    # MCP/skills/commands scanner
-│   │   └── prompt_expander.py     # Slash command expansion
+│   │   ├── config.py                   # Pydantic config models, env resolution
+│   │   ├── sdk_client.py               # Claude Code SDK wrapper
+│   │   ├── session_manager.py          # Session lifecycle (create/query/interrupt/destroy)
+│   │   ├── prewarm_pool.py             # Pre-warmed subprocess pool
+│   │   ├── provider_factory.py         # Bedrock / LiteLLM factory
+│   │   ├── llm_provider.py            # Abstract provider interface
+│   │   ├── subprocess_monitor.py       # RSS + duration guardrails
+│   │   ├── extension_loader.py         # MCP servers, skills, commands scanner
+│   │   ├── prompt_expander.py          # Slash command expansion
+│   │   └── providers/
+│   │       ├── bedrock.py              # AWS Bedrock (subprocess)
+│   │       └── litellm_provider.py     # LiteLLM (in-process)
 │   └── api/
 │       ├── openai/
-│       │   ├── adapter.py         # SDK → OpenAI SSE translation
-│       │   └── endpoint.py        # /v1/chat/completions route
+│       │   ├── adapter.py              # SDK events → OpenAI SSE translation
+│       │   └── endpoint.py             # POST /v1/chat/completions
 │       └── service/
-│           ├── sessions.py        # Session CRUD + interrupt
-│           ├── health.py          # Health probes
-│           └── extensions.py      # Extension listing
-├── frontend/
+│           ├── sessions.py             # Session CRUD + interrupt
+│           ├── health.py               # Liveness + readiness probes
+│           └── extensions.py           # Extension listing
+├── frontend/                           # React 19 frontend
 │   ├── src/
-│   │   ├── App.tsx                # Main app (chat, tool steps, streaming)
-│   │   └── App.css                # All styles (CLI-style tool steps)
-│   └── tests/
-│       └── e2e-tool-steps.test.tsx # Tool step UX integration tests
+│   │   ├── main.tsx                    # React entry point
+│   │   ├── App.tsx                     # Root component
+│   │   ├── components/
+│   │   │   ├── Header/                 # Title, connection status, extensions
+│   │   │   ├── MessageList/            # Chat message rendering
+│   │   │   ├── ChatInput/              # Input field, send/stop, slash autocomplete
+│   │   │   ├── ErrorBanner/            # Error display with copy
+│   │   │   ├── ToolSteps/              # ToolStepsContainer, ToolStepRow, CollapsedSteps
+│   │   │   └── CompletionMeta/         # Turns, cost, duration bar
+│   │   ├── stores/                     # Zustand state management
+│   │   │   ├── chatStore.ts            # Messages, streaming, send/stop
+│   │   │   ├── sessionStore.ts         # Session creation, connection status
+│   │   │   └── extensionStore.ts       # MCP servers, skills, commands
+│   │   ├── services/
+│   │   │   ├── api.ts                  # REST API client
+│   │   │   └── sseParser.ts            # OpenAI SSE stream parser
+│   │   ├── types/index.ts              # TypeScript interfaces
+│   │   └── utils/formatters.ts         # Tool name formatting (MCP server > tool)
+│   └── tests/                          # Vitest + Testing Library
+│       ├── App.test.tsx                # App integration tests
+│       └── e2e-tool-steps.test.tsx     # Tool step UX tests
+├── tests/                              # Backend test suite
+│   ├── unit/                           # Pool, session, adapter, provider tests
+│   ├── integration/                    # Startup, REST API, health tests
+│   ├── e2e/                            # Full workflow + edge case tests
+│   └── qa/                             # API contract validation
 ├── docs/
-│   ├── adr/                       # Architecture Decision Records
-│   └── mockups/                   # Interactive HTML mockups
-├── Dockerfile                     # Multi-stage build
-├── docker-compose.yml
-└── pyproject.toml
+│   ├── adr/                            # Architecture Decision Records
+│   └── wireframes/                     # Architecture diagrams (HTML + SVG)
+├── Dockerfile                          # Multi-stage build (Node + Python, non-root)
+├── docker-compose.yml                  # Single service, port 8000
+├── config.yaml                         # Runtime configuration
+└── pyproject.toml                      # Python project metadata (uv/hatchling)
 ```
 
 ## Roadmap
