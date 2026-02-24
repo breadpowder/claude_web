@@ -1,4 +1,4 @@
-"""Integration tests for platform startup sequence (TASK-009)."""
+"""Integration tests for platform startup sequence."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.core.config import Settings
+from src.core.config import load_engine_config
 from src.core.extension_loader import ExtensionLoader
 from src.core.prewarm_pool import PreWarmPool
 from src.core.prompt_expander import PromptExpander
@@ -16,6 +16,7 @@ from src.core.session_index import JSONSessionIndex
 from src.core.session_manager import SessionManager
 from src.core.subprocess_monitor import SubprocessMonitor
 from src.main import create_app
+from tests.conftest import write_test_config
 
 
 @dataclass
@@ -38,28 +39,21 @@ async def _bad_factory():
     raise RuntimeError("Invalid API key")
 
 
-@pytest.fixture(autouse=True)
-def set_env(tmp_path, monkeypatch):
-    """Set required env vars for tests."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("SESSION_INDEX_DIR", str(tmp_path / "sessions"))
-    monkeypatch.setenv("PROJECT_CWD", str(tmp_path / "project"))
-    monkeypatch.setenv("PREWARM_POOL_SIZE", "1")
-    (tmp_path / "project").mkdir(exist_ok=True)
-
-
 class TestStartupSequence:
     """Test the startup sequence by simulating what the lifespan does."""
 
     @pytest.mark.asyncio
     async def test_successful_startup_components(self, tmp_path):
         """Verify all components are created in correct sequence."""
-        settings = Settings()
+        config_path = write_test_config(
+            tmp_path, prewarm_pool_size=1
+        )
+        config = load_engine_config(config_path)
 
         # Step 1: Scan extensions
-        loader = ExtensionLoader(settings.project_cwd)
-        config = loader.scan()
-        assert config is not None
+        loader = ExtensionLoader(config.engine.project_cwd)
+        ext_config = loader.scan()
+        assert ext_config is not None
 
         # Step 2: Init session index
         index = JSONSessionIndex(str(tmp_path / "sessions"))
@@ -141,22 +135,24 @@ class TestNestedSessionEnvCleanup:
     """Test that CLAUDECODE env var is removed to prevent nested session errors."""
 
     @pytest.mark.asyncio
-    async def test_claudecode_env_removed_on_startup(self, monkeypatch):
+    async def test_claudecode_env_removed_on_startup(self, tmp_path, monkeypatch):
         """create_app must unset CLAUDECODE so SDK subprocess won't refuse to start."""
         import os
         monkeypatch.setenv("CLAUDECODE", "1")
 
-        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+        config_path = write_test_config(tmp_path)
+        app = create_app(client_factory=_good_factory, skip_prewarm=True, config_path=config_path)
 
         assert os.environ.get("CLAUDECODE") is None
 
     @pytest.mark.asyncio
-    async def test_claudecode_env_absent_stays_absent(self):
+    async def test_claudecode_env_absent_stays_absent(self, tmp_path):
         """If CLAUDECODE is not set, startup should not fail."""
         import os
         os.environ.pop("CLAUDECODE", None)
 
-        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+        config_path = write_test_config(tmp_path)
+        app = create_app(client_factory=_good_factory, skip_prewarm=True, config_path=config_path)
 
         assert os.environ.get("CLAUDECODE") is None
 
@@ -184,7 +180,8 @@ class TestUserLevelExtensionLoading:
 
         monkeypatch.setattr(ExtensionLoader, "__init__", patched_init)
 
-        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+        config_path = write_test_config(tmp_path)
+        app = create_app(client_factory=_good_factory, skip_prewarm=True, config_path=config_path)
 
         with TestClient(app) as client:
             resp = client.get("/api/v1/extensions")
@@ -213,8 +210,6 @@ class TestUserLevelExtensionLoading:
             "---\nname: dupe-skill\ndescription: Project version\n---\nProject body."
         )
 
-        monkeypatch.setenv("PROJECT_CWD", str(project_dir))
-
         original_init = ExtensionLoader.__init__
 
         def patched_init(self, base_dir, user_dir=None):
@@ -222,7 +217,10 @@ class TestUserLevelExtensionLoading:
 
         monkeypatch.setattr(ExtensionLoader, "__init__", patched_init)
 
-        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+        config_path = write_test_config(
+            tmp_path, project_cwd=str(project_dir)
+        )
+        app = create_app(client_factory=_good_factory, skip_prewarm=True, config_path=config_path)
 
         with TestClient(app) as client:
             resp = client.get("/api/v1/extensions")
@@ -236,25 +234,24 @@ class TestUserLevelExtensionLoading:
 class TestSDKOptionsConfiguration:
     """Test that SDK options are correctly built for skill execution."""
 
-    def test_sdk_options_includes_max_turns(self, monkeypatch):
-        """build_sdk_options must set max_turns so multi-turn tool use completes."""
-        from src.core.sdk_client import build_sdk_options
-        from src.core.config import Settings
+    def test_bedrock_provider_includes_max_turns(self, tmp_path):
+        """BedrockProvider must set max_turns so multi-turn tool use completes."""
+        from src.core.config import BedrockConfig, EngineSettings
+        from src.core.providers.bedrock import BedrockProvider
 
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        settings = Settings(_env_file=None)
-        opts = build_sdk_options(settings)
+        provider = BedrockProvider(
+            config=BedrockConfig(region="us-east-1"),
+            engine=EngineSettings(project_cwd=str(tmp_path)),
+        )
+        opts = provider._build_options()
         assert opts.max_turns is not None
-        assert opts.max_turns >= 10  # enough for multi-tool skill execution
+        assert opts.max_turns >= 10
 
-    def test_sdk_options_mcp_servers_correctly_built(self, monkeypatch):
+    def test_bedrock_provider_mcp_servers_correctly_built(self, tmp_path):
         """MCP server config must be correctly translated to SDK options."""
-        from src.core.sdk_client import build_sdk_options
-        from src.core.config import Settings
+        from src.core.config import BedrockConfig, EngineSettings
         from src.core.models import ExtensionConfig, MCPServerConfig
-
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        settings = Settings(_env_file=None)
+        from src.core.providers.bedrock import BedrockProvider
 
         ext_config = ExtensionConfig(
             mcp_servers={
@@ -267,8 +264,12 @@ class TestSDKOptionsConfiguration:
                 )
             }
         )
-        opts = build_sdk_options(settings, ext_config)
-        # MCP servers must be a dict with correct structure
+        provider = BedrockProvider(
+            config=BedrockConfig(region="us-east-1"),
+            engine=EngineSettings(project_cwd=str(tmp_path)),
+            extension_config=ext_config,
+        )
+        opts = provider._build_options()
         assert isinstance(opts.mcp_servers, dict)
         assert "github" in opts.mcp_servers
         server = opts.mcp_servers["github"]
@@ -276,14 +277,16 @@ class TestSDKOptionsConfiguration:
         assert server["args"] == ["-y", "server"]
         assert server["env"] == {"TOKEN": "abc"}
 
-    def test_sdk_options_permission_mode_bypass(self, monkeypatch):
+    def test_bedrock_provider_permission_mode_bypass(self, tmp_path):
         """SDK must use bypassPermissions for headless service operation."""
-        from src.core.sdk_client import build_sdk_options
-        from src.core.config import Settings
+        from src.core.config import BedrockConfig, EngineSettings
+        from src.core.providers.bedrock import BedrockProvider
 
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        settings = Settings(_env_file=None)
-        opts = build_sdk_options(settings)
+        provider = BedrockProvider(
+            config=BedrockConfig(region="us-east-1"),
+            engine=EngineSettings(project_cwd=str(tmp_path)),
+        )
+        opts = provider._build_options()
         assert opts.permission_mode == "bypassPermissions"
 
     def test_npm_available_in_environment(self):
@@ -295,8 +298,9 @@ class TestSDKOptionsConfiguration:
 
 class TestRouterRegistration:
     @pytest.mark.asyncio
-    async def test_liveness_probe_always_available(self):
-        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+    async def test_liveness_probe_always_available(self, tmp_path):
+        config_path = write_test_config(tmp_path)
+        app = create_app(client_factory=_good_factory, skip_prewarm=True, config_path=config_path)
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/api/v1/health/live")
@@ -304,9 +308,10 @@ class TestRouterRegistration:
         assert resp.json()["status"] == "ok"
 
     @pytest.mark.asyncio
-    async def test_routers_registered_on_app(self):
+    async def test_routers_registered_on_app(self, tmp_path):
         """Check that routes are registered (by inspecting app.routes)."""
-        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+        config_path = write_test_config(tmp_path)
+        app = create_app(client_factory=_good_factory, skip_prewarm=True, config_path=config_path)
         route_paths = [r.path for r in app.routes if hasattr(r, "path")]
         assert "/v1/chat/completions" in route_paths
         assert "/api/v1/sessions" in route_paths
@@ -315,8 +320,9 @@ class TestRouterRegistration:
         assert "/api/v1/health/live" in route_paths
 
     @pytest.mark.asyncio
-    async def test_agui_not_registered_phase1a(self):
+    async def test_agui_not_registered_phase1a(self, tmp_path):
         """AG-UI router should NOT be registered in Phase 1a."""
-        app = create_app(client_factory=_good_factory, skip_prewarm=True)
+        config_path = write_test_config(tmp_path)
+        app = create_app(client_factory=_good_factory, skip_prewarm=True, config_path=config_path)
         route_paths = [r.path for r in app.routes if hasattr(r, "path")]
         assert "/agent/run" not in route_paths

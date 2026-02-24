@@ -1,16 +1,17 @@
-"""Tests for health endpoints and CORS (TASK-001)."""
-
-import os
+"""Tests for health endpoints and CORS."""
 
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import write_test_config
+
 
 @pytest.fixture
-def client(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+def client(tmp_path):
+    config_path = write_test_config(tmp_path)
+
     from src.main import create_app
-    app = create_app()
+    app = create_app(config_path=config_path)
     return TestClient(app)
 
 
@@ -26,12 +27,13 @@ class TestHealthEndpoints:
 class TestCORS:
     """Test CORS middleware configuration."""
 
-    def test_cors_middleware_configured(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000")
+    def test_cors_middleware_configured(self, tmp_path):
+        config_path = write_test_config(
+            tmp_path, cors_origins="http://localhost:3000"
+        )
 
         from src.main import create_app
-        app = create_app()
+        app = create_app(config_path=config_path)
         test_client = TestClient(app)
 
         response = test_client.options(

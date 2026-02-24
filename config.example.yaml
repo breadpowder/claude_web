@@ -1,0 +1,58 @@
+# config.example.yaml - Core Engine Configuration
+#
+# Copy this file to config.yaml and fill in your provider credentials.
+# Secrets should be referenced via ${ENV_VAR} syntax so they are never
+# hardcoded.  Set the actual values in your shell, .env, or CI secrets.
+#
+# Only the selected provider block is used — the other is ignored.
+
+# ============================================================
+# Provider Selection
+# ============================================================
+# Choose one: "bedrock" | "litellm"
+provider: bedrock
+
+# ============================================================
+# AWS Bedrock (claude-code-sdk subprocess)
+# ============================================================
+bedrock:
+  model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  region: us-east-1
+
+  # Auth method 1: Access keys
+  access_key_id: ${AWS_ACCESS_KEY_ID}
+  secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+  session_token: ${AWS_SESSION_TOKEN}       # optional (for temporary creds)
+
+  # Auth method 2: AWS profile (uses ~/.aws/credentials)
+  # profile: default
+
+  # Auth method 3: Bedrock bearer token
+  # bearer_token: ${AWS_BEARER_TOKEN_BEDROCK}
+
+# ============================================================
+# LiteLLM (in-process Python SDK)
+# ============================================================
+litellm:
+  model: anthropic/claude-sonnet-4-5-20250929
+  api_key: ${ANTHROPIC_API_KEY}
+  # api_base: https://custom-endpoint.example.com  # optional
+
+  # Additional litellm params passed through to litellm.acompletion():
+  # temperature: 0.7
+  # max_tokens: 8192
+
+# ============================================================
+# Engine / Platform Settings
+# ============================================================
+engine:
+  prewarm_pool_size: 2            # only effective with bedrock provider
+  max_sessions: 10
+  max_session_duration_seconds: 3600
+  max_session_rss_mb: 512
+  host: 0.0.0.0
+  port: 8000
+  cors_origins: "*"
+  log_level: INFO
+  project_cwd: .
+  session_index_dir: ~/.claude-web/sessions

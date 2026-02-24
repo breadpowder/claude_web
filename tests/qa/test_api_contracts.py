@@ -32,31 +32,33 @@ async def fake_factory():
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     """Create app with mocked SDK boundary."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "qa-test-key")
-    monkeypatch.setenv("MAX_SESSIONS", "3")
-    monkeypatch.setenv("PREWARM_POOL_SIZE", "0")
-    monkeypatch.setenv("PROJECT_CWD", str(tmp_path / "project"))
-    monkeypatch.setenv("SESSION_INDEX_DIR", str(tmp_path / "sessions"))
-    monkeypatch.setenv("LOG_LEVEL", "WARNING")
+    from tests.conftest import write_test_config
 
-    (tmp_path / "project").mkdir(exist_ok=True)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
 
     # Create test extensions for extension API verification
-    skills_dir = tmp_path / "project" / ".claude" / "skills" / "test-skill"
+    skills_dir = project_dir / ".claude" / "skills" / "test-skill"
     skills_dir.mkdir(parents=True)
     (skills_dir / "SKILL.md").write_text(
         "---\ndescription: A test skill for QA\n---\n\nTest skill content."
     )
 
-    commands_dir = tmp_path / "project" / "commands"
+    commands_dir = project_dir / "commands"
     commands_dir.mkdir(parents=True)
     (commands_dir / "deploy.md").write_text(
         "---\ndescription: Deploy the application\n---\n\nDeploy instructions."
     )
 
+    config_path = write_test_config(
+        tmp_path,
+        max_sessions=3,
+        project_cwd=str(project_dir),
+    )
+
     from src.main import create_app
 
-    test_app = create_app(client_factory=fake_factory, skip_prewarm=True)
+    test_app = create_app(client_factory=fake_factory, skip_prewarm=True, config_path=config_path)
     yield test_app
 
 
@@ -413,14 +415,18 @@ class TestQA_EDGE:
 
     def test_qa_edge_extensions_no_config(self, app, tmp_path, monkeypatch):
         """QA-EDGE: Extensions endpoint works with empty project dir (may include user-level)."""
-        # Use a completely empty project directory
+        from tests.conftest import write_test_config
+
         empty_dir = tmp_path / "empty_project"
         empty_dir.mkdir()
-        monkeypatch.setenv("PROJECT_CWD", str(empty_dir))
+
+        config_path = write_test_config(
+            tmp_path, project_cwd=str(empty_dir)
+        )
 
         from src.main import create_app
 
-        empty_app = create_app(client_factory=fake_factory, skip_prewarm=True)
+        empty_app = create_app(client_factory=fake_factory, skip_prewarm=True, config_path=config_path)
         with TestClient(empty_app) as c:
             resp = c.get("/api/v1/extensions")
             assert resp.status_code == 200

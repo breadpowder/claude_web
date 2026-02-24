@@ -19,10 +19,11 @@ ENV/
 *.swo
 *~
 
-# Environment
+# Environment & config (contain secrets)
 .env
 .env.local
 .env.*.local
+config.yaml
 
 # OS
 .DS_Store

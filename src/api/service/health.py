@@ -13,11 +13,11 @@ async def readiness_probe(request: Request):
     """Readiness probe with pool and session metrics."""
     pool = request.app.state.pool
     session_manager = request.app.state.session_manager
-    settings = request.app.state.settings
+    config = request.app.state.config
 
     pool_depth = pool.size()
     active_sessions = session_manager.active_session_count()
-    max_sessions = settings.max_sessions
+    max_sessions = config.engine.max_sessions
 
     if pool_depth == 0:
         return JSONResponse(

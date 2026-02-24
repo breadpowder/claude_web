@@ -3,25 +3,23 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import patch
 from fastapi.testclient import TestClient
+
+from tests.conftest import write_test_config
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     """Create a test app with mocked SDK components."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-e2e")
-    monkeypatch.setenv("MAX_SESSIONS", "3")
-    monkeypatch.setenv("PREWARM_POOL_SIZE", "0")
-    monkeypatch.setenv("PROJECT_CWD", str(tmp_path / "project"))
-    monkeypatch.setenv("SESSION_INDEX_DIR", str(tmp_path / "sessions"))
-    monkeypatch.setenv("LOG_LEVEL", "WARNING")
-
-    (tmp_path / "project").mkdir(exist_ok=True)
+    config_path = write_test_config(
+        tmp_path,
+        prewarm_pool_size=0,
+        max_sessions=3,
+    )
 
     from src.main import create_app
 
-    test_app = create_app(skip_prewarm=True)
+    test_app = create_app(skip_prewarm=True, config_path=config_path)
     yield test_app
 
 

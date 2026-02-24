@@ -71,9 +71,9 @@ def _create_test_app(
     pool = MagicMock()
     pool.size.return_value = pool_depth
 
-    # Settings
-    settings = MagicMock()
-    settings.max_sessions = 10
+    # Config (matches EngineConfig shape for health endpoint)
+    config = MagicMock()
+    config.engine.max_sessions = 10
 
     # Extension config
     if extension_config is None:
@@ -82,7 +82,7 @@ def _create_test_app(
     app.state.session_index = index
     app.state.session_manager = sm
     app.state.pool = pool
-    app.state.settings = settings
+    app.state.config = config
     app.state.extension_config = extension_config
 
     return app

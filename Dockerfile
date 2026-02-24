@@ -9,7 +9,7 @@ RUN npm run build
 # Stage 2: Python backend + serve frontend
 FROM python:3.12-slim AS runtime
 
-# Install curl + Node.js (required by claude-code-sdk)
+# Install curl + Node.js (required by claude-code-sdk for bedrock provider)
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 COPY --from=frontend-build /usr/local/bin/node /usr/local/bin/node
 COPY --from=frontend-build /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -21,6 +21,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 RUN uv sync --no-dev
 COPY src/ ./src/
+COPY config.yaml ./
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
