@@ -63,3 +63,7 @@ claudesdk_integration.md
 
 # Pytest cache
 .pytest_cache/
+
+# Runtime files
+.claude-web.log
+.claude-web.pid

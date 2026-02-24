@@ -3,11 +3,11 @@ services:
     build: .
     ports:
       - "8000:8000"
-    env_file:
-      - .env   # Provides secrets as environment variables for ${VAR} resolution
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./workspace:/workspace
+      - ${CLAUDE_CONFIG_DIR:-./.claude}:/home/claude/.claude:ro
+      - ${CLAUDE_JSON:-./.claude.json}:/home/claude/.claude.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
       interval: 30s
